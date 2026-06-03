@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Monopoly Deal — Online</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(160deg, #080810 0%, #0d1020 60%, #080810 100%);
+    color: #fff;
+    font-family: 'Trebuchet MS', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  button { font-family: inherit; cursor: pointer; transition: opacity 0.15s, transform 0.1s; }
+  button:active { transform: scale(0.97); }
+  input { font-family: inherit; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+
+  /* ── LOBBY ── */
+  #lobby {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 24px;
+  }
+  .lobby-box {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 20px; padding: 36px 32px;
+    max-width: 420px; width: 100%; text-align: center;
+  }
+  .lobby-box h1 { font-size: 38px; font-weight: 900; letter-spacing: 3px; color: #FFD700; }
+  .lobby-box h2 { font-size: 15px; font-weight: 400; color: #888; letter-spacing: 5px; margin: 4px 0 32px; }
+  .divider { height: 1px; background: rgba(255,255,255,0.08); margin: 24px 0; }
+  .lbl { font-size: 11px; color: #777; margin-bottom: 6px; text-align: left; }
+  .inp {
+    width: 100%; padding: 11px 14px; border-radius: 8px;
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+    color: #fff; font-size: 14px; outline: none; margin-bottom: 10px;
+  }
+  .inp:focus { border-color: rgba(255,215,0,0.4); }
+  .btn-gold {
+    width: 100%; padding: 13px; background: linear-gradient(135deg,#FFD700,#FFA500);
+    color: #000; font-weight: 800; font-size: 15px; border: none;
+    border-radius: 10px; letter-spacing: 1px; margin-top: 4px;
+  }
+  .btn-ghost {
+    width: 100%; padding: 11px; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12); color: #ccc; font-weight: 600;
+    font-size: 14px; border-radius: 10px; margin-top: 8px;
+  }
+  .room-code-display {
+    font-size: 40px; font-weight: 900; letter-spacing: 10px; color: #FFD700;
+    background: rgba(255,215,0,0.08); border: 1px solid rgba(255,215,0,0.2);
+    border-radius: 12px; padding: 16px; margin: 12px 0;
+  }
+  .player-slot {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 6px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #4CAF50; flex-shrink: 0; }
+  .dot.waiting { background: #555; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .status-bar {
+    font-size: 12px; color: #888; margin-top: 12px; min-height: 18px;
+  }
+  #waitingMsg { font-size: 12px; color: #777; margin-top: 10px; }
+
+  /* ── GAME ── */
+  #game { display: none; flex-direction: column; min-height: 100vh; }
+  .header {
+    background: rgba(0,0,0,0.5); border-bottom: 1px solid rgba(255,255,255,0.07);
+    padding: 9px 14px; display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .header-left { font-weight: 900; font-size: 15px; color: #FFD700; letter-spacing: 2px; }
+  .header-right { display: flex; gap: 8px; align-items: center; font-size: 12px; color: #666; }
+  .turn-banner {
+    text-align: center; padding: 8px 14px;
+    font-size: 13px; font-weight: 700;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .turn-banner.mine { color: #4CAF50; background: rgba(76,175,80,0.07); }
+  .turn-banner.theirs { color: #888; background: rgba(0,0,0,0.2); }
+
+  /* Other players strip */
+  .opponents-strip {
+    display: flex; gap: 8px; padding: 8px 12px; overflow-x: auto;
+    border-bottom: 1px solid rgba(255,255,255,0.05); flex-shrink: 0;
+  }
+  .opp-card {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; padding: 8px 12px; min-width: 120px; flex-shrink: 0;
+    cursor: pointer; transition: border-color 0.2s;
+  }
+  .opp-card.active { border-color: #FFD700; background: rgba(255,215,0,0.06); }
+  .opp-card .name { font-size: 12px; font-weight: 700; color: #fff; }
+  .opp-card .stats { font-size: 10px; color: #888; margin-top: 2px; }
+  .opp-card .sets { font-size: 9px; color: #FFD700; margin-top: 2px; }
+  .opp-card .turn-ind {
+    font-size: 9px; color: #4CAF50; font-weight: 700;
+    margin-top: 2px; display: none;
+  }
+  .opp-card.is-turn .turn-ind { display: block; }
+
+  /* Viewed opponent board */
+  #opp-board-view {
+    display: none; padding: 10px 14px;
+    background: rgba(255,215,0,0.03); border-bottom: 1px solid rgba(255,215,0,0.08);
+  }
+  #opp-board-view .opp-board-name { font-size: 12px; color: #FFD700; font-weight: 700; margin-bottom: 6px; }
+
+  /* Action buttons */
+  .action-bar {
+    padding: 8px 14px; display: flex; gap: 8px; align-items: center;
+    border-bottom: 1px solid rgba(255,255,255,0.05); flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .action-bar .turn-info { font-size: 12px; color: #888; flex: 1; }
+  .btn-draw {
+    padding: 8px 16px; background: #FFD700; color: #000;
+    font-weight: 700; font-size: 13px; border: none; border-radius: 8px;
+  }
+  .btn-play {
+    padding: 8px 16px; background: #4CAF50; color: #fff;
+    font-weight: 700; font-size: 13px; border: none; border-radius: 8px;
+  }
+  .btn-play:disabled { background: #333; color: #666; cursor: not-allowed; }
+  .btn-end {
+    padding: 8px 14px; background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15); color: #fff;
+    font-weight: 700; font-size: 13px; border-radius: 8px;
+  }
+  .btn-bank {
+    padding: 6px 12px; background: rgba(76,175,80,0.15);
+    border: 1px solid rgba(76,175,80,0.3); color: #90EE90;
+    font-size: 12px; font-weight: 700; border-radius: 6px;
+  }
+
+  /* Properties */
+  .props-section { padding: 6px 14px 4px; flex-shrink: 0; }
+  .section-label { font-size: 10px; color: #555; margin-bottom: 5px; }
+  .props-groups { display: flex; gap: 6px; flex-wrap: wrap; }
+  .prop-group {
+    border-radius: 8px; padding: 6px 8px;
+    border: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.03);
+  }
+  .prop-group.complete {
+    border-color: rgba(255,215,0,0.25); background: rgba(255,215,0,0.05);
+  }
+  .prop-group-label { font-size: 9px; font-weight: 700; margin-bottom: 3px; }
+  .prop-group-cards { display: flex; gap: 3px; }
+  .prop-impr { font-size: 9px; color: #FFD700; margin-top: 3px; }
+
+  /* Bank */
+  .bank-section {
+    padding: 4px 14px 6px; display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0; min-height: 28px;
+  }
+  .bank-label { font-size: 10px; color: #555; white-space: nowrap; }
+  .bank-cards { display: flex; gap: 3px; flex-wrap: wrap; }
+  .bank-total { font-size: 11px; color: #90EE90; white-space: nowrap; }
+
+  /* Hand */
+  .hand-section {
+    flex: 1; padding: 6px 14px 12px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .hand-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+
+  /* Card visuals */
+  .card {
+    border-radius: 7px; flex-shrink: 0; cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.12);
+    transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+    position: relative; overflow: hidden; display: flex; flex-direction: column;
+    user-select: none;
+  }
+  .card.selected {
+    border-color: #FFD700; transform: translateY(-8px);
+    box-shadow: 0 8px 24px rgba(255,215,0,0.35);
+  }
+  .card.sm { width: 68px; height: 98px; }
+  .card.lg { width: 90px; height: 130px; }
+  .card.xs { width: 52px; height: 75px; }
+  .card-money {
+    background: linear-gradient(160deg,#1a4a1a,#2d8c2d);
+    align-items: center; justify-content: center;
+  }
+  .card-money .val { font-size: 22px; font-weight: 900; color: #90EE90; font-family: Georgia,serif; }
+  .card-money .lbl2 { font-size: 8px; color: #6aaa6a; margin-top: 1px; }
+  .card-prop { background: #1a1a2e; }
+  .card-prop .prop-header {
+    height: 30px; display: flex; align-items: center; justify-content: center;
+    padding: 0 3px;
+  }
+  .card-prop .prop-header span { font-size: 8px; font-weight: 700; text-align: center; line-height: 1.2; }
+  .card-prop .prop-body {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 4px;
+  }
+  .card-prop .prop-val { font-size: 18px; font-weight: 700; }
+  .card-prop .prop-color-label { font-size: 8px; color: #888; margin-top: 2px; }
+  .card-wild { background: linear-gradient(160deg,#2a1a4a,#1a2a4a); align-items: center; justify-content: center; }
+  .card-wild .wild-icon { font-size: 22px; }
+  .card-wild .wild-lbl { font-size: 8px; color: #aaa; margin-top: 4px; text-align: center; padding: 0 4px; }
+  .card-action { display: flex; flex-direction: column; }
+  .card-action .act-name { font-size: 8px; font-weight: 700; color: #fff; text-align: center; padding: 6px 4px 2px; line-height: 1.2; }
+  .card-action .act-desc { flex: 1; font-size: 7px; color: #ccc; text-align: center; padding: 0 4px; line-height: 1.3; display: flex; align-items: center; justify-content: center; }
+  .card-action .act-val { text-align: center; padding-bottom: 5px; font-size: 11px; font-weight: 700; color: #FFD700; }
+  .card-back { background: linear-gradient(135deg,#1a1a3a,#2a1a4a); align-items: center; justify-content: center; }
+
+  /* Log */
+  .log-section {
+    padding: 6px 14px; border-top: 1px solid rgba(255,255,255,0.05);
+    background: rgba(0,0,0,0.3); max-height: 72px; overflow-y: auto; flex-shrink: 0;
+  }
+  .log-entry { font-size: 10px; color: #555; line-height: 1.5; }
+  .log-entry.fresh { color: #bbb; }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.78);
+    display: flex; align-items: center; justify-content: center; z-index: 200;
+  }
+  .modal-box {
+    background: #12121e; border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px; padding: 24px; max-width: 400px; width: 92%;
+    max-height: 82vh; overflow-y: auto;
+  }
+  .modal-title { font-size: 16px; font-weight: 700; color: #FFD700; margin-bottom: 10px; }
+  .modal-sub { font-size: 12px; color: #aaa; margin-bottom: 12px; line-height: 1.5; }
+  .modal-btn {
+    padding: 8px 14px; border: none; border-radius: 8px;
+    font-weight: 700; font-size: 13px; margin: 4px;
+  }
+  .modal-btn.accent { background: #FFD700; color: #000; }
+  .modal-btn.ghost { background: rgba(255,255,255,0.08); color: #fff; }
+  .color-btn {
+    display: block; width: 100%; margin: 4px 0; padding: 9px 12px;
+    border: none; border-radius: 6px; font-weight: 700; font-size: 13px;
+    text-align: left; cursor: pointer;
+  }
+  .discard-grid { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+
+  /* Winner screen */
+  #winner-screen {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.92); z-index: 300;
+    align-items: center; justify-content: center; flex-direction: column;
+    text-align: center; padding: 24px;
+  }
+  #winner-screen .trophy { font-size: 80px; margin-bottom: 12px; }
+  #winner-screen h1 { font-size: 44px; color: #FFD700; font-weight: 900; margin-bottom: 6px; }
+  #winner-screen p { font-size: 18px; color: #aaa; margin-bottom: 28px; }
+
+  /* Notification toast */
+  #toast {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    background: rgba(30,30,50,0.95); border: 1px solid rgba(255,215,0,0.3);
+    color: #FFD700; padding: 10px 20px; border-radius: 50px;
+    font-size: 13px; font-weight: 600; z-index: 400;
+    transition: opacity 0.4s; opacity: 0; pointer-events: none; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<!-- ─── LOBBY ─────────────────────────────────────────────────────────── -->
+<div id="lobby">
+  <div class="lobby-box">
+    <div style="font-size:44px;margin-bottom:8px">🏦</div>
+    <h1>MONOPOLY</h1>
+    <h2>D E A L &nbsp;· &nbsp;O N L I N E</h2>
+
+    <div class="lbl">Your Name</div>
+    <input class="inp" id="myName" placeholder="Enter your name" maxlength="20" />
+
+    <button class="btn-gold" onclick="createRoom()">🎲 Create Room</button>
+
+    <div class="divider"></div>
+
+    <div class="lbl">Or join an existing room</div>
+    <input class="inp" id="joinCode" placeholder="Enter 6-digit room code" maxlength="6"
+      style="text-transform:uppercase;letter-spacing:4px;text-align:center;font-weight:700"
+      oninput="this.value=this.value.toUpperCase()" />
+    <button class="btn-ghost" onclick="joinRoom()">🚪 Join Room</button>
+
+    <div class="status-bar" id="lobbyStatus"></div>
+  </div>
+</div>
+
+<!-- ─── WAITING ROOM ──────────────────────────────────────────────────── -->
+<div id="waitingRoom" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:50;align-items:center;justify-content:center;">
+  <div class="lobby-box">
+    <div style="font-size:13px;color:#888;margin-bottom:4px">Room Code</div>
+    <div class="room-code-display" id="displayCode">——</div>
+    <div style="font-size:11px;color:#666;margin-bottom:20px">Share this code with your coworkers</div>
+
+    <div style="text-align:left;margin-bottom:12px">
+      <div class="lbl">Players in room (<span id="playerCount">1</span> joined)</div>
+      <div id="playerSlots"></div>
+    </div>
+
+    <div id="startSection" style="display:none">
+      <div style="font-size:11px;color:#888;margin-bottom:8px">You are the host. Start when everyone joins.</div>
+      <button class="btn-gold" id="startBtn" onclick="startGame()">▶ Start Game</button>
+    </div>
+    <div id="waitingMsg">Waiting for host to start the game...</div>
+
+    <button class="btn-ghost" style="margin-top:16px" onclick="location.reload()">← Back to Menu</button>
+  </div>
+</div>
+
+<!-- ─── GAME ──────────────────────────────────────────────────────────── -->
+<div id="game">
+  <div class="header">
+    <div class="header-left">🏦 MONOPOLY DEAL</div>
+    <div class="header-right">
+      <span id="deckCount">Deck: —</span>
+      <button onclick="location.reload()" style="padding:4px 10px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);color:#aaa;border-radius:6px;font-size:11px">↩ Menu</button>
+    </div>
+  </div>
+
+  <div class="turn-banner" id="turnBanner">—</div>
+
+  <!-- Opponents strip -->
+  <div class="opponents-strip" id="opponentsStrip"></div>
+
+  <!-- Viewed opponent board -->
+  <div id="opp-board-view">
+    <div class="opp-board-name" id="oppBoardName"></div>
+    <div class="props-groups" id="oppBoardProps"></div>
+  </div>
+
+  <!-- Action bar -->
+  <div class="action-bar">
+    <div class="turn-info" id="turnInfo">—</div>
+    <button class="btn-draw" id="btnDraw" onclick="handleDraw()" style="display:none">Draw 2 ↓</button>
+    <button class="btn-play" id="btnPlay" onclick="handlePlay()" style="display:none" disabled>Play Card ▶</button>
+    <button class="btn-bank" id="btnBank" onclick="handleBank()" style="display:none">Bank It 💰</button>
+    <button class="btn-end" id="btnEnd" onclick="handleEndTurn()" style="display:none">End Turn →</button>
+  </div>
+
+  <!-- My properties -->
+  <div class="props-section">
+    <div class="section-label">Your Properties — <span id="setsComplete">0</span>/3 sets complete</div>
+    <div class="props-groups" id="myProps"></div>
+  </div>
+
+  <!-- My bank -->
+  <div class="bank-section">
+    <div class="bank-label">Bank:</div>
+    <div class="bank-cards" id="myBank"></div>
+    <div class="bank-total" id="bankTotal">$0M</div>
+  </div>
+
+  <!-- Hand -->
+  <div class="hand-section">
+    <div class="section-label" id="handLabel">Hand (0)</div>
+    <div class="hand-scroll" id="myHand"></div>
+  </div>
+
+  <!-- Log -->
+  <div class="log-section" id="gameLog"></div>
+</div>
+
+<!-- ─── WINNER ────────────────────────────────────────────────────────── -->
+<div id="winner-screen">
+  <div class="trophy">🏆</div>
+  <h1 id="winnerName">—</h1>
+  <p>Wins the game!</p>
+  <button class="btn-gold" style="width:200px" onclick="location.reload()">Play Again</button>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Modal container -->
+<div id="modalContainer"></div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// SUPABASE CONFIG  ←  Replace with YOUR values if needed
+// ─────────────────────────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://wycqxkfumzvkrrzuupgg.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5Y3F4a2Z1bXp2a3JyenV1cGdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgxNjI0NTksImV4cCI6MjA2MzczODQ1OX0.GrCKZMbGmHQ3Nxi_jQmGq5qOECJElKGMQjLlb2fOXLs";
+const sbClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CARD DATA
+// ─────────────────────────────────────────────────────────────────────────────
+const PROP_COLORS = {
+  brown:     { label:"Brown",      needed:2, color:"#8B4513", text:"#fff" },
+  lightblue: { label:"Light Blue", needed:3, color:"#87CEEB", text:"#1a1a1a" },
+  pink:      { label:"Pink",       needed:3, color:"#FF69B4", text:"#fff" },
+  orange:    { label:"Orange",     needed:3, color:"#FF8C00", text:"#fff" },
+  red:       { label:"Red",        needed:3, color:"#DC143C", text:"#fff" },
+  yellow:    { label:"Yellow",     needed:3, color:"#FFD700", text:"#1a1a1a" },
+  green:     { label:"Green",      needed:3, color:"#228B22", text:"#fff" },
+  darkblue:  { label:"Dark Blue",  needed:2, color:"#00008B", text:"#fff" },
+  railroad:  { label:"Railroad",   needed:4, color:"#444",    text:"#fff" },
+  utility:   { label:"Utility",    needed:2, color:"#708090", text:"#fff" },
+};
+const RENT_MAP = {
+  brown:[1,2], lightblue:[1,2,3], pink:[1,2,4], orange:[1,3,5],
+  red:[2,3,6], yellow:[2,4,6], green:[2,4,7], darkblue:[3,8],
+  railroad:[1,2,3,4], utility:[1,2],
+};
+
+let _cid = 0;
+const mkCard = (type, d) => ({ id: ++_cid, type, ...d });
+
+function buildDeck() {
+  const cards = [];
+  [1,2,3,4,5,6,7,8,9,10].forEach((v,i) => {
+    const counts=[6,5,3,3,2,2,2,2,2,2];
+    for(let j=0;j<counts[i];j++) cards.push(mkCard("money",{value:v,label:`$${v}M`}));
+  });
+  const props = [
+    ["brown","Mediterranean Ave",1,2],["brown","Baltic Ave",1,2],
+    ["lightblue","Oriental Ave",1,3],["lightblue","Vermont Ave",1,3],["lightblue","Connecticut Ave",1,3],
+    ["pink","St. Charles Pl",2,3],["pink","States Ave",2,3],["pink","Virginia Ave",2,3],
+    ["orange","St. James Pl",2,3],["orange","Tennessee Ave",2,3],["orange","New York Ave",2,3],
+    ["red","Kentucky Ave",3,3],["red","Indiana Ave",3,3],["red","Illinois Ave",3,3],
+    ["yellow","Atlantic Ave",3,3],["yellow","Ventnor Ave",3,3],["yellow","Marvin Gardens",3,3],
+    ["green","Pacific Ave",4,3],["green","N. Carolina Ave",4,3],["green","Pennsylvania Ave",4,3],
+    ["darkblue","Park Place",4,2],["darkblue","Boardwalk",4,2],
+    ["railroad","Reading RR",2,4],["railroad","Pennsylvania RR",2,4],["railroad","B&O Railroad",2,4],["railroad","Short Line RR",2,4],
+    ["utility","Electric Co.",2,2],["utility","Water Works",2,2],
+  ];
+  props.forEach(([color,name,value,count])=>{
+    for(let i=0;i<count;i++) cards.push(mkCard("property",{color,name,value}));
+  });
+  for(let i=0;i<2;i++) cards.push(mkCard("wild",{label:"Wild",value:0,colors:Object.keys(PROP_COLORS)}));
+  cards.push(mkCard("wild",{label:"Wild (RR+Util)",value:0,colors:["railroad","utility"]}));
+  cards.push(mkCard("wild",{label:"Wild (Gr+DB)",value:0,colors:["green","darkblue"]}));
+  const actions=[
+    {name:"Pass Go",value:1,desc:"Draw 2 extra cards",count:10},
+    {name:"Debt Collector",value:3,desc:"Collect $5M from any player",count:3},
+    {name:"It's My Birthday",value:2,desc:"Collect $2M from everyone",count:3},
+    {name:"Deal Breaker",value:5,desc:"Steal a complete property set",count:2},
+    {name:"Sly Deal",value:3,desc:"Steal one property card",count:3},
+    {name:"Forced Deal",value:3,desc:"Swap a property with anyone",count:4},
+    {name:"Just Say No",value:4,desc:"Cancel any action vs you",count:3},
+    {name:"Hotel",value:4,desc:"Add hotel to a complete set",count:3},
+    {name:"House",value:3,desc:"Add house to a complete set",count:3},
+    {name:"Double Rent",value:1,desc:"Double rent this turn",count:2},
+    {name:"Rent (All)",value:1,desc:"Charge rent to all players",count:3,rentColors:Object.keys(PROP_COLORS)},
+    {name:"Rent (Br/LB)",value:1,desc:"Rent: Brown or Light Blue",count:2,rentColors:["brown","lightblue"]},
+    {name:"Rent (Pk/Or)",value:1,desc:"Rent: Pink or Orange",count:2,rentColors:["pink","orange"]},
+    {name:"Rent (Re/Ye)",value:1,desc:"Rent: Red or Yellow",count:2,rentColors:["red","yellow"]},
+    {name:"Rent (Gr/DB)",value:1,desc:"Rent: Green or Dark Blue",count:2,rentColors:["green","darkblue"]},
+    {name:"Rent (RR/Ut)",value:1,desc:"Rent: Railroad or Utility",count:2,rentColors:["railroad","utility"]},
+  ];
+  actions.forEach(({name,value,desc,count,rentColors})=>{
+    for(let i=0;i<count;i++) cards.push(mkCard("action",{name,value,desc,rentColors:rentColors||null}));
+  });
+  return cards;
+}
+
+function shuffle(arr){
+  const a=[...arr];
+  for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
+  return a;
+}
+
+function initGame(names){
+  const deck=shuffle(buildDeck());
+  const players=names.map((name,i)=>({id:i,name,hand:[],bank:[],properties:{},improvements:{}}));
+  players.forEach(p=>{p.hand=deck.splice(0,5);});
+  return {deck,discard:[],players,currentPlayer:0,actionsLeft:3,phase:"draw",log:["Game started!"],winner:null};
+}
+
+function checkWinner(p){
+  return Object.entries(p.properties).filter(([c,a])=>a.length>=PROP_COLORS[c].needed).length>=3;
+}
+function getRent(p,color){
+  const count=(p.properties[color]||[]).length;
+  const arr=RENT_MAP[color]||[];
+  const base=arr[Math.min(count-1,arr.length-1)]||0;
+  const impr=p.improvements[color]||{};
+  let bonus=0;
+  if(count>=(PROP_COLORS[color]?.needed||99)){
+    if(impr.hotel) bonus=7; else if(impr.house) bonus=4;
+  }
+  return base+bonus;
+}
+function bankTotal(p){ return p.bank.reduce((s,c)=>s+c.value,0); }
+function completeSetsCount(p){
+  return Object.entries(p.properties).filter(([c,a])=>a.length>=PROP_COLORS[c].needed).length;
+}
+function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────────────────────
+let myName="", roomCode="", myPlayerIdx=-1, isHost=false;
+let channel=null, roomPlayers=[];
+let G=null; // full game state (only exists after game starts)
+let selectedCardIdx=-1;
+let viewingOppIdx=null;
+let modalStep={};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOBBY FUNCTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+function setLobbyStatus(msg,err=false){
+  const el=document.getElementById("lobbyStatus");
+  el.textContent=msg;
+  el.style.color=err?"#f66":"#888";
+}
+
+async function createRoom(){
+  myName=document.getElementById("myName").value.trim();
+  if(!myName){ setLobbyStatus("Please enter your name",true); return; }
+  roomCode=Math.random().toString(36).substr(2,6).toUpperCase();
+  isHost=true;
+  roomPlayers=[{name:myName,idx:0}];
+  myPlayerIdx=0;
+  setLobbyStatus("Creating room…");
+  await subscribeRoom();
+  showWaitingRoom();
+}
+
+async function joinRoom(){
+  myName=document.getElementById("myName").value.trim();
+  const code=document.getElementById("joinCode").value.trim().toUpperCase();
+  if(!myName){ setLobbyStatus("Please enter your name",true); return; }
+  if(code.length<4){ setLobbyStatus("Enter a valid room code",true); return; }
+  roomCode=code;
+  isHost=false;
+  setLobbyStatus("Joining room…");
+  await subscribeRoom();
+  // announce join
+  await channel.send({type:"broadcast",event:"join",payload:{name:myName}});
+  showWaitingRoom();
+}
+
+async function subscribeRoom(){
+  channel = sbClient.channel(`md-room-${roomCode}`, {
+    config:{ broadcast:{self:true} }
+  });
+  channel.on("broadcast",{event:"join"},({payload})=>{
+    // New player joined — host assigns idx
+    if(isHost){
+      const existing=roomPlayers.find(p=>p.name===payload.name);
+      if(!existing){
+        const idx=roomPlayers.length;
+        roomPlayers.push({name:payload.name,idx});
+        broadcastRoomState();
+      }
+    }
+  });
+  channel.on("broadcast",{event:"room_state"},({payload})=>{
+    roomPlayers=payload.players;
+    if(!isHost){
+      const me=roomPlayers.find(p=>p.name===myName);
+      if(me) myPlayerIdx=me.idx;
+    }
+    renderWaitingRoom();
+  });
+  channel.on("broadcast",{event:"game_start"},({payload})=>{
+    G=payload.game;
+    showGame();
+  });
+  channel.on("broadcast",{event:"game_update"},({payload})=>{
+    G=payload.game;
+    renderGame();
+    if(G.winner){ showWinner(G.winner); }
+  });
+  await new Promise(res=>{ channel.subscribe(status=>{ if(status==="SUBSCRIBED") res(); }); });
+  if(isHost){
+    await broadcastRoomState();
+  }
+}
+
+async function broadcastRoomState(){
+  await channel.send({type:"broadcast",event:"room_state",payload:{players:roomPlayers}});
+  renderWaitingRoom();
+}
+
+function showWaitingRoom(){
+  document.getElementById("lobby").style.display="none";
+  const wr=document.getElementById("waitingRoom");
+  wr.style.display="flex";
+  document.getElementById("displayCode").textContent=roomCode;
+  renderWaitingRoom();
+}
+
+function renderWaitingRoom(){
+  document.getElementById("playerCount").textContent=roomPlayers.length;
+  const slots=document.getElementById("playerSlots");
+  slots.innerHTML=roomPlayers.map(p=>`
+    <div class="player-slot">
+      <div class="dot"></div>
+      <div style="font-size:13px;font-weight:700">${p.name}</div>
+      ${p.idx===0?'<div style="font-size:10px;color:#888;margin-left:auto">Host</div>':''}
+    </div>
+  `).join("")+`<div class="player-slot"><div class="dot waiting"></div><div style="font-size:13px;color:#555">Waiting for player...</div></div>`;
+  if(isHost){
+    document.getElementById("startSection").style.display="block";
+    document.getElementById("waitingMsg").style.display="none";
+    document.getElementById("startBtn").disabled=roomPlayers.length<2;
+    document.getElementById("startBtn").style.opacity=roomPlayers.length<2?0.5:1;
+    document.getElementById("startBtn").textContent=
+      roomPlayers.length<2?"Waiting for players… (need 2+)":"▶ Start Game";
+  }
+}
+
+async function startGame(){
+  if(!isHost||roomPlayers.length<2) return;
+  const names=roomPlayers.sort((a,b)=>a.idx-b.idx).map(p=>p.name);
+  G=initGame(names);
+  await channel.send({type:"broadcast",event:"game_start",payload:{game:G}});
+  showGame();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GAME SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
+function showGame(){
+  document.getElementById("waitingRoom").style.display="none";
+  document.getElementById("lobby").style.display="none";
+  document.getElementById("game").style.display="flex";
+  renderGame();
+}
+
+async function broadcastGame(){
+  await channel.send({type:"broadcast",event:"game_update",payload:{game:G}});
+  renderGame();
+  if(G.winner) showWinner(G.winner);
+}
+
+function isMyTurn(){ return G.currentPlayer===myPlayerIdx; }
+
+function renderGame(){
+  if(!G) return;
+  const me=G.players[myPlayerIdx];
+  const cp=G.players[G.currentPlayer];
+  const myTurn=isMyTurn();
+
+  // Turn banner
+  const banner=document.getElementById("turnBanner");
+  if(myTurn){
+    banner.textContent=`⭐ Your Turn — ${G.phase==="draw"?"Draw 2 cards":`Actions left: ${G.actionsLeft}`}`;
+    banner.className="turn-banner mine";
+  } else {
+    banner.textContent=`${cp.name}'s Turn…`;
+    banner.className="turn-banner theirs";
+  }
+
+  // Deck
+  document.getElementById("deckCount").textContent=`Deck: ${G.deck.length}`;
+
+  // Buttons
+  const btnDraw=document.getElementById("btnDraw");
+  const btnPlay=document.getElementById("btnPlay");
+  const btnBank=document.getElementById("btnBank");
+  const btnEnd=document.getElementById("btnEnd");
+  btnDraw.style.display=myTurn&&G.phase==="draw"?"inline-block":"none";
+  btnPlay.style.display=myTurn&&G.phase==="play"&&selectedCardIdx>=0?"inline-block":"none";
+  btnBank.style.display=myTurn&&G.phase==="play"&&selectedCardIdx>=0?"inline-block":"none";
+  btnEnd.style.display=myTurn&&G.phase==="play"?"inline-block":"none";
+  btnPlay.disabled=G.actionsLeft===0;
+
+  const turnInfo=document.getElementById("turnInfo");
+  if(!myTurn) turnInfo.textContent=`Waiting for ${cp.name}…`;
+  else if(G.phase==="draw") turnInfo.textContent="Draw 2 cards to begin your turn";
+  else turnInfo.textContent=`Actions: ${G.actionsLeft} remaining`;
+
+  // Opponents strip
+  renderOpponentsStrip();
+
+  // My board
+  renderMyProperties(me);
+  renderMyBank(me);
+  renderHand(me);
+
+  // Sets complete
+  document.getElementById("setsComplete").textContent=completeSetsCount(me);
+
+  // Log
+  const log=document.getElementById("gameLog");
+  log.innerHTML=G.log.slice(0,8).map((l,i)=>`<div class="log-entry ${i===0?"fresh":""}">${l}</div>`).join("");
+}
+
+function renderOpponentsStrip(){
+  const strip=document.getElementById("opponentsStrip");
+  strip.innerHTML="";
+  G.players.forEach((p,i)=>{
+    if(i===myPlayerIdx) return;
+    const isCurrentTurn=G.currentPlayer===i;
+    const div=document.createElement("div");
+    div.className=`opp-card${viewingOppIdx===i?" active":""}${isCurrentTurn?" is-turn":""}`;
+    div.innerHTML=`
+      <div class="name">${p.name}</div>
+      <div class="stats">🤚${p.hand.length} | 💰$${bankTotal(p)}M | 🏘${Object.values(p.properties).flat().length}</div>
+      <div class="sets">${completeSetsCount(p)}/3 sets complete</div>
+      <div class="turn-ind">▶ Their turn</div>
+    `;
+    div.onclick=()=>{
+      viewingOppIdx=viewingOppIdx===i?null:i;
+      renderGame();
+    };
+    strip.appendChild(div);
+  });
+  // Viewed opponent board
+  const boardView=document.getElementById("opp-board-view");
+  if(viewingOppIdx!==null && G.players[viewingOppIdx]){
+    boardView.style.display="block";
+    document.getElementById("oppBoardName").textContent=G.players[viewingOppIdx].name+"'s Properties";
+    document.getElementById("oppBoardProps").innerHTML=renderPropsHTML(G.players[viewingOppIdx],true);
+  } else {
+    boardView.style.display="none";
+  }
+}
+
+function renderPropsHTML(player,small=false){
+  const colors=Object.keys(PROP_COLORS);
+  const groups=colors.filter(c=>(player.properties[c]||[]).length>0);
+  if(!groups.length) return '<span style="font-size:11px;color:#444">No properties yet.</span>';
+  return groups.map(color=>{
+    const cards=player.properties[color]||[];
+    const needed=PROP_COLORS[color].needed;
+    const complete=cards.length>=needed;
+    const impr=player.improvements[color]||{};
+    return `<div class="prop-group${complete?" complete":""}">
+      <div class="prop-group-label" style="color:${PROP_COLORS[color].color}">${PROP_COLORS[color].label} ${complete?"✓":`${cards.length}/${needed}`}</div>
+      <div class="prop-group-cards">${cards.map(c=>cardHTML(c,small?"xs":"sm")).join("")}</div>
+      ${complete&&(impr.house||impr.hotel)?`<div class="prop-impr">${impr.hotel?"🏨 Hotel":"🏠 House"}</div>`:""}
+    </div>`;
+  }).join("");
+}
+
+function renderMyProperties(me){
+  document.getElementById("myProps").innerHTML=renderPropsHTML(me);
+}
+
+function renderMyBank(me){
+  const bc=document.getElementById("myBank");
+  bc.innerHTML=me.bank.map(c=>cardHTML(c,"xs")).join("") || '<span style="font-size:11px;color:#444">Empty</span>';
+  document.getElementById("bankTotal").textContent=`= $${bankTotal(me)}M`;
+}
+
+function renderHand(me){
+  const container=document.getElementById("myHand");
+  container.innerHTML="";
+  document.getElementById("handLabel").textContent=`Your Hand (${me.hand.length}) — tap to select`;
+  me.hand.forEach((card,i)=>{
+    const div=document.createElement("div");
+    div.innerHTML=cardHTML(card,"lg",selectedCardIdx===i);
+    const inner=div.firstElementChild;
+    inner.onclick=()=>{
+      selectedCardIdx=selectedCardIdx===i?-1:i;
+      renderGame();
+    };
+    container.appendChild(inner);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CARD HTML
+// ─────────────────────────────────────────────────────────────────────────────
+function cardHTML(card,size="sm",selected=false){
+  const sel=selected?" selected":"";
+  if(card.type==="money"){
+    return `<div class="card card-money ${size}${sel}">
+      <div class="val">$${card.value}M</div>
+      <div class="lbl2">MONEY</div>
+    </div>`;
+  }
+  if(card.type==="property"){
+    const col=PROP_COLORS[card.color];
+    return `<div class="card card-prop ${size}${sel}">
+      <div class="prop-header" style="background:${col.color}">
+        <span style="color:${col.text}">${card.name}</span>
+      </div>
+      <div class="prop-body">
+        <div class="prop-val" style="color:${col.color}">$${card.value}M</div>
+        <div class="prop-color-label">${col.label}</div>
+      </div>
+    </div>`;
+  }
+  if(card.type==="wild"){
+    return `<div class="card card-wild ${size}${sel}">
+      <div class="wild-icon">🌈</div>
+      <div class="wild-lbl">${card.label}</div>
+    </div>`;
+  }
+  if(card.type==="action"){
+    const isRent=card.name.startsWith("Rent");
+    const bg=isRent
+      ?"linear-gradient(160deg,#3a1a1a,#6a2020)"
+      :card.name==="Just Say No"
+      ?"linear-gradient(160deg,#1a1a3a,#2020aa)"
+      :"linear-gradient(160deg,#2a2a1a,#5a5a20)";
+    return `<div class="card card-action ${size}${sel}" style="background:${bg}">
+      <div class="act-name">${card.name}</div>
+      <div class="act-desc">${card.desc}</div>
+      <div class="act-val">$${card.value}M</div>
+    </div>`;
+  }
+  return `<div class="card card-back ${size}">🎴</div>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TURN ACTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+function handleDraw(){
+  if(!isMyTurn()||G.phase!=="draw") return;
+  G=deepClone(G);
+  const p=G.players[myPlayerIdx];
+  let drawn=0;
+  for(let i=0;i<2;i++){
+    if(G.deck.length===0){ G.deck=shuffle(G.discard); G.discard=[]; }
+    if(G.deck.length>0){ p.hand.push(G.deck.pop()); drawn++; }
+  }
+  G.phase="play";
+  G.log=[`${p.name} drew ${drawn} card(s).`,...G.log.slice(0,19)];
+  selectedCardIdx=-1;
+  broadcastGame();
+}
+
+function handleBank(){
+  if(!isMyTurn()||G.phase!=="play"||selectedCardIdx<0) return;
+  const me=G.players[myPlayerIdx];
+  const card=me.hand[selectedCardIdx];
+  if(!card) return;
+  G=deepClone(G);
+  const p=G.players[myPlayerIdx];
+  const [c]=p.hand.splice(selectedCardIdx,1);
+  p.bank.push(c);
+  G.actionsLeft--;
+  G.log=[`${p.name} banked ${c.label||c.name||"a card"}.`,...G.log.slice(0,19)];
+  selectedCardIdx=-1;
+  if(checkWinner(p)) G.winner=p.name;
+  broadcastGame();
+}
+
+function handlePlay(){
+  if(!isMyTurn()||G.phase!=="play"||selectedCardIdx<0||G.actionsLeft===0) return;
+  const me=G.players[myPlayerIdx];
+  const card=me.hand[selectedCardIdx];
+  if(!card) return;
+  if(card.type==="money"){ handleBank(); return; }
+  if(card.type==="property"){ playProperty(selectedCardIdx,card.color); return; }
+  if(card.type==="wild"){
+    openModal({type:"pickWildColor",cardIdx:selectedCardIdx,colors:card.colors}); return;
+  }
+  if(card.type==="action"){ handleAction(card,selectedCardIdx); }
+}
+
+function playProperty(cardIdx,color){
+  G=deepClone(G);
+  const p=G.players[myPlayerIdx];
+  const [c]=p.hand.splice(cardIdx,1);
+  if(!p.properties[color]) p.properties[color]=[];
+  p.properties[color].push(c);
+  G.actionsLeft--;
+  G.log=[`${p.name} played ${c.name} (${PROP_COLORS[color].label}).`,...G.log.slice(0,19)];
+  selectedCardIdx=-1;
+  if(checkWinner(p)) G.winner=p.name;
+  broadcastGame();
+  closeModal();
+}
+
+function handleAction(card,cardIdx){
+  if(card.name==="Pass Go"){
+    G=deepClone(G);
+    const p=G.players[myPlayerIdx];
+    p.hand.splice(cardIdx,1);
+    G.discard.push(card);
+    for(let i=0;i<2;i++){
+      if(G.deck.length===0){G.deck=shuffle(G.discard);G.discard=[];}
+      if(G.deck.length>0) p.hand.push(G.deck.pop());
+    }
+    G.actionsLeft--;
+    G.log=[`${p.name} played Pass Go — drew 2 extra cards.`,...G.log.slice(0,19)];
+    selectedCardIdx=-1;
+    broadcastGame();
+  } else if(card.name==="It's My Birthday"){
+    openModal({type:"birthday",cardIdx});
+  } else if(card.name==="Debt Collector"){
+    openModal({type:"debtCollector",cardIdx});
+  } else if(card.name==="Sly Deal"){
+    openModal({type:"slyDeal",cardIdx});
+  } else if(card.name==="Deal Breaker"){
+    openModal({type:"dealBreaker",cardIdx});
+  } else if(card.name.startsWith("Rent")){
+    openModal({type:"rent",cardIdx,rentColors:card.rentColors});
+  } else if(card.name==="House"||card.name==="Hotel"){
+    openModal({type:"improvement",cardIdx,improvType:card.name.toLowerCase()});
+  } else if(card.name==="Double Rent"){
+    // Bank as money equivalent
+    handleBank();
+  } else {
+    handleBank();
+  }
+}
+
+function handleEndTurn(){
+  if(!isMyTurn()||G.phase==="draw") return;
+  const me=G.players[myPlayerIdx];
+  if(me.hand.length>7){
+    openModal({type:"discard",excess:me.hand.length-7});
+    return;
+  }
+  advanceTurn();
+}
+
+function advanceTurn(){
+  G=deepClone(G);
+  G.currentPlayer=(G.currentPlayer+1)%G.players.length;
+  G.actionsLeft=3;
+  G.phase="draw";
+  G.log=[`It's ${G.players[G.currentPlayer].name}'s turn.`,...G.log.slice(0,19)];
+  selectedCardIdx=-1;
+  broadcastGame();
+  closeModal();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODAL SYSTEM
+// ─────────────────────────────────────────────────────────────────────────────
+let currentModal=null;
+function openModal(m){ currentModal=m; modalStep={}; renderModal(); }
+function closeModal(){ currentModal=null; modalStep={}; document.getElementById("modalContainer").innerHTML=""; }
+
+function renderModal(){
+  if(!currentModal){ closeModal(); return; }
+  const m=currentModal;
+  const me=G.players[myPlayerIdx];
+  const others=G.players.filter((_,i)=>i!==myPlayerIdx);
+  let html="";
+
+  const overlay=`<div class="modal-overlay" onclick="void(0)">`;
+  const box=`<div class="modal-box" onclick="event.stopPropagation()">`;
+  const accBtn=(lbl,fn)=>`<button class="modal-btn accent" onclick="${fn}">${lbl}</button>`;
+  const ghostBtn=(lbl,fn)=>`<button class="modal-btn ghost" onclick="${fn}">${lbl}</button>`;
+  const colorBtn=(lbl,color,fn)=>`<button class="color-btn" style="background:${PROP_COLORS[color]?.color||'#333'};color:${PROP_COLORS[color]?.text||'#fff'}" onclick="${fn}">${lbl}</button>`;
+
+  if(m.type==="pickWildColor"){
+    html=`${overlay}${box}
+      <div class="modal-title">🌈 Pick Color for Wild Card</div>
+      <div>${m.colors.map(c=>colorBtn(PROP_COLORS[c]?.label||c,c,`resolveModal("wildColor","${c}")`)).join("")}</div>
+      ${ghostBtn("Cancel","closeModal()")}
+    </div></div>`;
+  }
+  else if(m.type==="birthday"){
+    html=`${overlay}${box}
+      <div class="modal-title">🎂 It's My Birthday!</div>
+      <div class="modal-sub">Collect $2M from every other player. Payment is taken from their bank automatically.</div>
+      ${accBtn("Collect $2M from everyone!","resolveModal('birthday')")}
+      ${ghostBtn("Cancel","closeModal()")}
+    </div></div>`;
+  }
+  else if(m.type==="debtCollector"){
+    html=`${overlay}${box}
+      <div class="modal-title">💸 Debt Collector</div>
+      <div class="modal-sub">Pick a player to collect $5M from:</div>
+      ${others.map(p=>`${accBtn(`${p.name} ($${bankTotal(p)}M in bank)`,`resolveModal('debtCollector',${p.id})`)}`).join("")}
+      ${ghostBtn("Cancel","closeModal()")}
+    </div></div>`;
+  }
+  else if(m.type==="rent"){
+    const availColors=(m.rentColors||[]).filter(c=>(me.properties[c]||[]).length>0);
+    if(!modalStep.color){
+      html=`${overlay}${box}
+        <div class="modal-title">🏠 Charge Rent</div>
+        <div class="modal-sub">Pick the color to charge rent on:</div>
+        ${availColors.length===0?'<div style="color:#f66;font-size:12px">You have no matching properties!</div>':""}
+        ${availColors.map(c=>{
+          const rent=getRent(me,c);
+          return `<button class="color-btn" style="background:${PROP_COLORS[c].color};color:${PROP_COLORS[c].text}" onclick="modalStep.color='${c}';renderModal()">
+            ${PROP_COLORS[c].label} — Rent: $${rent}M (${(me.properties[c]||[]).length}/${PROP_COLORS[c].needed})
+          </button>`;
+        }).join("")}
+        ${ghostBtn("Cancel","closeModal()")}
+      </div></div>`;
+    } else {
+      const color=modalStep.color;
+      const rent=getRent(me,color);
+      const isAll=(m.rentColors||[]).length>4;
+      if(isAll){
+        html=`${overlay}${box}
+          <div class="modal-title">Charge All Players?</div>
+          <div class="modal-sub">Charge $${rent}M rent on ${PROP_COLORS[color].label} from all players?</div>
+          ${accBtn("Yes, charge everyone!","resolveModal('rentAll')")}
+          ${ghostBtn("Cancel","closeModal()")}
+        </div></div>`;
+      } else {
+        html=`${overlay}${box}
+          <div class="modal-title">Pick Player to Charge</div>
+          <div class="modal-sub">Charge $${rent}M for ${PROP_COLORS[color].label}:</div>
+          ${others.map(p=>`${accBtn(`${p.name}`,`resolveModal('rentOne',${p.id})`)}`).join("")}
+          ${ghostBtn("Cancel","closeModal()")}
+        </div></div>`;
+      }
+    }
+  }
+  else if(m.type==="slyDeal"){
+    if(modalStep.targetId===undefined){
+      html=`${overlay}${box}
+        <div class="modal-title">🦊 Sly Deal — Pick Target</div>
+        ${others.map(p=>`${accBtn(p.name,`modalStep.targetId=${p.id};renderModal()`)}`).join("")}
+        ${ghostBtn("Cancel","closeModal()")}
+      </div></div>`;
+    } else {
+      const target=G.players[modalStep.targetId];
+      const stealable=Object.entries(target.properties)
+        .filter(([c,a])=>a.length>0&&a.length<PROP_COLORS[c].needed);
+      if(!modalStep.color){
+        html=`${overlay}${box}
+          <div class="modal-title">Sly Deal — Pick Color</div>
+          ${stealable.length===0?'<div style="color:#f66;font-size:12px">No incomplete sets to steal!</div>':""}
+          ${stealable.map(([c,a])=>colorBtn(`${PROP_COLORS[c].label} (${a.length} cards)`,c,`modalStep.color='${c}';renderModal()`)).join("")}
+          ${ghostBtn("Cancel","closeModal()")}
+        </div></div>`;
+      } else {
+        const props=target.properties[modalStep.color]||[];
+        html=`${overlay}${box}
+          <div class="modal-title">Sly Deal — Pick Card</div>
+          ${props.map((c,i)=>`<button class="color-btn" style="background:rgba(255,255,255,0.08);color:#fff" onclick="resolveModal('slyDeal',${i})">${c.name}</button>`).join("")}
+          ${ghostBtn("Cancel","closeModal()")}
+        </div></div>`;
+      }
+    }
+  }
+  else if(m.type==="dealBreaker"){
+    const completeSets=[];
+    G.players.forEach((p,pi)=>{
+      if(pi===myPlayerIdx) return;
+      Object.entries(p.properties).forEach(([c,a])=>{
+        if(a.length>=PROP_COLORS[c].needed) completeSets.push({player:p,playerIdx:pi,color:c});
+      });
+    });
+    html=`${overlay}${box}
+      <div class="modal-title">💥 Deal Breaker — Steal a Full Set</div>
+      ${completeSets.length===0?'<div style="color:#f66;font-size:12px">No complete sets to steal!</div>':""}
+      ${completeSets.map(({player,playerIdx,color})=>
+        `<button class="color-btn" style="background:${PROP_COLORS[color].color};color:${PROP_COLORS[color].text}" onclick="resolveModal('dealBreaker',${playerIdx},'${color}')">${player.name}'s ${PROP_COLORS[color].label}</button>`
+      ).join("")}
+      ${ghostBtn("Cancel","closeModal()")}
+    </div></div>`;
+  }
+  else if(m.type==="improvement"){
+    const validColors=Object.entries(me.properties)
+      .filter(([c,a])=>a.length>=PROP_COLORS[c].needed)
+      .filter(([c])=>{
+        const impr=me.improvements[c]||{};
+        if(m.improvType==="house") return !impr.house;
+        if(m.improvType==="hotel") return impr.house&&!impr.hotel;
+        return false;
+      });
+    html=`${overlay}${box}
+      <div class="modal-title">${m.improvType==="house"?"🏠 Add House":"🏨 Add Hotel"}</div>
+      ${validColors.length===0?`<div style="color:#f66;font-size:12px">No valid sets!${m.improvType==="hotel"?" (Need a house first)":""}</div>`:""}
+      ${validColors.map(([c])=>colorBtn(PROP_COLORS[c].label,c,`resolveModal('improvement','${c}')`)).join("")}
+      ${ghostBtn("Cancel","closeModal()")}
+    </div></div>`;
+  }
+  else if(m.type==="discard"){
+    if(!modalStep.discardSel) modalStep.discardSel=[];
+    const needed=m.excess;
+    const sel=modalStep.discardSel;
+    html=`${overlay}${box}
+      <div class="modal-title">Discard ${needed} Card${needed>1?"s":""}</div>
+      <div class="modal-sub">Select ${needed} card${needed>1?"s":""} to discard (you have ${me.hand.length}, max is 7).</div>
+      <div class="discard-grid">
+        ${me.hand.map((c,i)=>`<div onclick="toggleDiscard(${i},${needed})">${cardHTML(c,"sm",sel.includes(i))}</div>`).join("")}
+      </div>
+      <button class="modal-btn${sel.length===needed?" accent":" ghost"}"
+        onclick="sel.length===${needed}?resolveModal('discard'):void(0)"
+        style="opacity:${sel.length===needed?1:0.5}"
+      >Discard Selected (${sel.length}/${needed})</button>
+    </div></div>`;
+  }
+
+  document.getElementById("modalContainer").innerHTML=html;
+}
+
+function toggleDiscard(idx,needed){
+  if(!modalStep.discardSel) modalStep.discardSel=[];
+  const s=modalStep.discardSel;
+  if(s.includes(idx)){
+    modalStep.discardSel=s.filter(x=>x!==idx);
+  } else if(s.length<needed){
+    modalStep.discardSel=[...s,idx];
+  }
+  renderModal();
+}
+
+function resolveModal(action, arg1, arg2){
+  const m=currentModal;
+  if(!m) return;
+  const me=G.players[myPlayerIdx];
+
+  if(action==="wildColor"){
+    playProperty(m.cardIdx,arg1);
+  }
+  else if(action==="birthday"){
+    G=deepClone(G);
+    const p=G.players[myPlayerIdx];
+    G.players.forEach((t,ti)=>{
+      if(ti===myPlayerIdx) return;
+      let owed=2,paid=0;
+      while(paid<owed&&t.bank.length>0){ const pay=t.bank.pop(); p.bank.push(pay); paid+=pay.value; }
+    });
+    p.hand.splice(m.cardIdx,1);
+    G.actionsLeft--;
+    G.log=[`${p.name} played It's My Birthday! Collected from everyone.`,...G.log.slice(0,19)];
+    selectedCardIdx=-1;
+    broadcastGame(); closeModal();
+  }
+  else if(action==="debtCollector"){
+    const targetId=arg1;
+    G=deepClone(G);
+    const p=G.players[myPlayerIdx];
+    const t=G.players[targetId];
+    let owed=5,paid=0;
+    while(paid<owed&&t.bank.length>0){ const pay=t.bank.pop(); p.bank.push(pay); paid+=pay.value; }
+    p.hand.splice(m.cardIdx,1);
+    G.actionsLeft--;
+    G.log=[`${p.name} used Debt Collector on ${t.name}!`,...G.log.slice(0,19)];
+    selectedCardIdx=-1;
+    broadcastGame(); closeModal();
+  }
+  else if(action==="rentAll"){
+    const color=modalStep.color;
+    G=deepClone(G);
+    const p=G.players[myPlayerIdx];
+    const rent=getRent(p,color);
+    G.players.forEach((t,ti)=>{
+      if(ti===myPlayerIdx) return;
+      let owed=rent,paid=0;
+      while(paid<owed&&t.bank.length>0){ const pay=t.bank.pop(); p.bank.push(pay); paid+=pay.value; }
+    });
+    p.hand.splice(m.cardIdx,1);
+    G.actionsLeft--;
+    G.log=[`${p.name} charged $${rent}M rent on ${PROP_COLORS[color].label} to all!`,...G.log.slice(0,19)];
+    selectedCardIdx=-1;
+    broadcastGame(); closeModal();
+  }
+  else if(action==="rentOne"){
+    const color=modalStep.color;
+    const targetId=arg1;
+    G=deepClone(G);
+    const p=G.players[myPlayerIdx];
+    const t=G.players[targetId];
+    const rent=getRent(p,color);
+    let owed=rent,paid=0;
+    while(paid<owed&&t.bank.length>0){ const pay=t.bank.pop(); p.bank.push(pay); paid+=pay.value; }
+    p.hand.splice(m.cardIdx,1);
+    G.actionsLeft--;
+    G.log=[`${p.name} charged $${rent}M rent on ${PROP_COLORS[color].label} to ${t.name}!`,...G.log.slice(0,19)];
+    selectedCardIdx=-1;
+    broadcastGame(); closeModal();
+  }
+  else if(action==="slyDeal"){
+    const propIdx=arg1;
+    G=deepClone(G);
+    const p=G.players[myPlayerIdx];
+    const t=G.players[modalStep.targetId];
+    const color=modalStep.color;
+    const [stolen]=t.properties[color].splice(propIdx,1);
+    if(!p.properties[color]) p.properties[color]=[];
+    p.properties[color].push(stolen);
+    p.hand.splice(m.cardIdx,1);
+    G.actionsLeft--;
+    G.log=[`${p.name} used Sly Deal — stole ${stolen.name} from ${t.name}!`,...G.log.slice(0,19)];
+    selectedCardIdx=-1;
+    if(checkWinner(p)) G.winner=p.name;
+    broadcastGame(); closeModal();
+  }
+  else if(action==="dealBreaker"){
+    const targetPlayerIdx=arg1, color=arg2;
+    G=deepClone(G);
+    const p=G.players[myPlayerIdx];
+    const t=G.players[targetPlayerIdx];
+    const stolen=t.properties[color]||[];
+    p.properties[color]=[...(p.properties[color]||[]),...stolen];
+    t.properties[color]=[];
+    p.hand.splice(m.cardIdx,1);
+    G.actionsLeft--;
+    G.log=[`${p.name} used Deal Breaker — stole ${PROP_COLORS[color].label} from ${t.name}!`,...G.log.slice(0,19)];
+    selectedCardIdx=-1;
+    if(checkWinner(p)) G.winner=p.name;
+    broadcastGame(); closeModal();
+  }
+  else if(action==="improvement"){
+    const color=arg1;
+    G=deepClone(G);
+    const p=G.players[myPlayerIdx];
+    if(!p.improvements[color]) p.improvements[color]={};
+    if(m.improvType==="house") p.improvements[color].house=true;
+    if(m.improvType==="hotel") p.improvements[color].hotel=true;
+    p.hand.splice(m.cardIdx,1);
+    G.actionsLeft--;
+    G.log=[`${p.name} added a ${m.improvType} to ${PROP_COLORS[color].label}.`,...G.log.slice(0,19)];
+    selectedCardIdx=-1;
+    broadcastGame(); closeModal();
+  }
+  else if(action==="discard"){
+    const sel=modalStep.discardSel||[];
+    if(sel.length!==m.excess) return;
+    G=deepClone(G);
+    const p=G.players[myPlayerIdx];
+    sel.sort((a,b)=>b-a).forEach(i=>{ const [c]=p.hand.splice(i,1); G.discard.push(c); });
+    G.log=[`${p.name} discarded ${sel.length} card(s).`,...G.log.slice(0,19)];
+    broadcastGame();
+    closeModal();
+    advanceTurn();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WINNER
+// ─────────────────────────────────────────────────────────────────────────────
+function showWinner(name){
+  document.getElementById("winnerName").textContent=name;
+  const ws=document.getElementById("winner-screen");
+  ws.style.display="flex";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOAST
+// ─────────────────────────────────────────────────────────────────────────────
+function showToast(msg){
+  const t=document.getElementById("toast");
+  t.textContent=msg; t.style.opacity=1;
+  setTimeout(()=>{ t.style.opacity=0; },2500);
+}
+</script>
+</body>
+</html>
