@@ -1138,6 +1138,7 @@ function renderModal(){
       addBtn("Cancel","ghost",closeModal);
     }
   }
+  else if(m.type==="improvement"){
     const validColors=Object.entries(me.properties)
       .filter(([c,a])=>a.length>=PROP_COLORS[c].needed)
       .filter(([c])=>{
