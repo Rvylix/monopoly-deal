@@ -846,6 +846,40 @@ function cardHTML(card,size="sm",selected=false){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PAYMENT HELPER — bank first, then cheapest properties to cover remainder
+// ─────────────────────────────────────────────────────────────────────────────
+function payPlayer(debtor, creditor, owed){
+  let paid=0;
+  // 1. Drain bank first (largest bills first to minimise overpay)
+  const sortedBank=[...debtor.bank].sort((a,b)=>b.value-a.value);
+  debtor.bank=[];
+  for(const card of sortedBank){
+    if(paid>=owed){ debtor.bank.push(card); }
+    else { creditor.bank.push(card); paid+=card.value; }
+  }
+  if(paid>=owed) return paid;
+  // 2. Use properties (cheapest first) to cover remaining
+  const allProps=[];
+  Object.entries(debtor.properties).forEach(([color,cards])=>{
+    cards.forEach((c,i)=>allProps.push({color,idx:i,value:c.value,card:c}));
+  });
+  allProps.sort((a,b)=>a.value-b.value);
+  for(const {color,card} of allProps){
+    if(paid>=owed) break;
+    // Remove from debtor's properties
+    const arr=debtor.properties[color];
+    const pos=arr.indexOf(card);
+    if(pos===-1) continue;
+    arr.splice(pos,1);
+    // Add to creditor's properties
+    if(!creditor.properties[color]) creditor.properties[color]=[];
+    creditor.properties[color].push(card);
+    paid+=card.value;
+  }
+  return paid;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TURN ACTIONS
 // ─────────────────────────────────────────────────────────────────────────────
 function handleDraw(){
@@ -1201,8 +1235,7 @@ function resolveModal(action, arg1, arg2){
     const p=G.players[myPlayerIdx];
     G.players.forEach((t,ti)=>{
       if(ti===myPlayerIdx) return;
-      let owed=2,paid=0;
-      while(paid<owed&&t.bank.length>0){ const pay=t.bank.pop(); p.bank.push(pay); paid+=pay.value; }
+      payPlayer(t,p,2);
     });
     p.hand.splice(m.cardIdx,1);
     G.actionsLeft--;
@@ -1215,12 +1248,12 @@ function resolveModal(action, arg1, arg2){
     G=deepClone(G);
     const p=G.players[myPlayerIdx];
     const t=G.players[targetId];
-    let owed=5,paid=0;
-    while(paid<owed&&t.bank.length>0){ const pay=t.bank.pop(); p.bank.push(pay); paid+=pay.value; }
+    const paid=payPlayer(t,p,5);
     p.hand.splice(m.cardIdx,1);
     G.actionsLeft--;
-    G.log=[`${p.name} used Debt Collector on ${t.name}!`,...G.log.slice(0,19)];
+    G.log=[`${p.name} used Debt Collector on ${t.name}! Collected $${paid}M.`,...G.log.slice(0,19)];
     selectedCardIdx=-1;
+    if(checkWinner(p)) G.winner=p.name;
     broadcastGame(); closeModal();
   }
   else if(action==="rentAll"){
@@ -1230,13 +1263,13 @@ function resolveModal(action, arg1, arg2){
     const rent=getRent(p,color);
     G.players.forEach((t,ti)=>{
       if(ti===myPlayerIdx) return;
-      let owed=rent,paid=0;
-      while(paid<owed&&t.bank.length>0){ const pay=t.bank.pop(); p.bank.push(pay); paid+=pay.value; }
+      payPlayer(t,p,rent);
     });
     p.hand.splice(m.cardIdx,1);
     G.actionsLeft--;
     G.log=[`${p.name} charged $${rent}M rent on ${PROP_COLORS[color].label} to all!`,...G.log.slice(0,19)];
     selectedCardIdx=-1;
+    if(checkWinner(p)) G.winner=p.name;
     broadcastGame(); closeModal();
   }
   else if(action==="rentOne"){
@@ -1246,12 +1279,12 @@ function resolveModal(action, arg1, arg2){
     const p=G.players[myPlayerIdx];
     const t=G.players[targetId];
     const rent=getRent(p,color);
-    let owed=rent,paid=0;
-    while(paid<owed&&t.bank.length>0){ const pay=t.bank.pop(); p.bank.push(pay); paid+=pay.value; }
+    const paid=payPlayer(t,p,rent);
     p.hand.splice(m.cardIdx,1);
     G.actionsLeft--;
-    G.log=[`${p.name} charged $${rent}M rent on ${PROP_COLORS[color].label} to ${t.name}!`,...G.log.slice(0,19)];
+    G.log=[`${p.name} charged $${rent}M rent on ${PROP_COLORS[color].label} to ${t.name}! Paid $${paid}M.`,...G.log.slice(0,19)];
     selectedCardIdx=-1;
+    if(checkWinner(p)) G.winner=p.name;
     broadcastGame(); closeModal();
   }
   else if(action==="slyDeal"){
