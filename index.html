@@ -421,7 +421,7 @@ function payPlayer(debtor,creditor,owed){
 
 // ── STATE ─────────────────────────────────────────────────────────────────
 let myName="",roomCode="",myPlayerIdx=-1,isHost=false,roomPlayers=[];
-let G=null,selectedCards=[],modalStep={},_pendingJSN=null,handOpen=false;
+let G=null,selectedCards=[],modalStep={},_pendingJSN=null,_pendingJSNActionCard=null,handOpen=false;
 
 // ── SOUND ─────────────────────────────────────────────────────────────────
 function beep(f=520,d=180){
@@ -468,34 +468,42 @@ async function subscribeRoom(){
     document.getElementById("jsnContainer").innerHTML="";
     if(msg.data.used){
       G=clone(G);
-      // 1. Discard JSN card from target's hand
+      // 1. Discard JSN card from target's hand (find by name)
       const t=G.players[msg.data.targetIdx];
       const jsnIdx=t.hand.findIndex(c=>c.name==="Just Say No");
       if(jsnIdx>=0){const[j]=t.hand.splice(jsnIdx,1);G.discard.push(j);}
-      // 2. Find and discard the attacker's action card by ID (most reliable)
+
+      // 2. Discard the attacker's action card using the captured reference
       const attacker=G.players[myPlayerIdx];
       let acIdx=-1;
-      if(msg.data.cardId!=null){
+      // Try by captured card ID first (most reliable)
+      if(_pendingJSNActionCard!=null){
+        acIdx=attacker.hand.findIndex(c=>c.id===_pendingJSNActionCard.id);
+      }
+      // Fallback: by broadcast cardId
+      if(acIdx<0&&msg.data.cardId!=null){
         acIdx=attacker.hand.findIndex(c=>c.id===msg.data.cardId);
       }
-      // Fallback to index if ID lookup fails
-      if(acIdx<0&&msg.data.cardIdx!=null){
+      // Last fallback: by index
+      if(acIdx<0&&msg.data.cardIdx!=null&&msg.data.cardIdx<attacker.hand.length){
         acIdx=msg.data.cardIdx;
       }
-      if(acIdx>=0&&acIdx<attacker.hand.length){
+      if(acIdx>=0){
         const[ac]=attacker.hand.splice(acIdx,1);
         G.discard.push(ac);
       }
-      // Costs 1 action
+
       G.actionsLeft=Math.max(0,G.actionsLeft-1);
-      addLog(G,t.name+" used Just Say No! Action cancelled. Both cards discarded.",msg.data.targetIdx);
+      addLog(G,t.name+" used Just Say No! Both cards discarded.",msg.data.targetIdx);
       _pendingJSN=null;
-      currentModal=null; // clear modal so closeModal doesn't conflict
+      _pendingJSNActionCard=null;
+      currentModal=null;
       selectedCards=[];
       document.getElementById("modalContainer").innerHTML="";
       bcastGame();
     }else{
       // Allowed — execute the pending action
+      _pendingJSNActionCard=null;
       if(_pendingJSN){_pendingJSN(null);_pendingJSN=null;}
     }
   });
@@ -884,24 +892,26 @@ function advanceTurn(){
 }
 
 // ── JSN ───────────────────────────────────────────────────────────────────
+// Store captured action card here so jsn_response can always find it
+
 function checkJSN(targetPlayerIdx,actionLabel,cardIdx,onConfirm){
   const target=G.players[targetPlayerIdx];
   if(!target.hand.some(c=>c.name==="Just Say No")){
     onConfirm(null);return;
   }
   _pendingJSN=onConfirm;
-  // Store the card's unique ID so we can find it even if index shifts
+  // Capture the action card object directly — immune to G state changes
   const attacker=G.players[myPlayerIdx];
-  const actionCard=attacker.hand[cardIdx];
-  const cardId=actionCard?actionCard.id:null;
+  _pendingJSNActionCard=attacker.hand[cardIdx]||null;
+  const cardId=_pendingJSNActionCard?_pendingJSNActionCard.id:null;
+
   const jsnC=document.getElementById("jsnContainer");jsnC.innerHTML="";
   const ov=document.createElement("div");ov.className="jsn-overlay";
   const bx=document.createElement("div");bx.className="jsn-box";
   bx.innerHTML=`<h2 style="font-size:19px;font-weight:900;margin-bottom:8px">⏳ Waiting...</h2><p style="font-size:12px;color:#bbb;margin-bottom:18px">Asking <strong>${target.name}</strong> if they want to use<br><strong>Just Say No</strong> against:<br><em>${actionLabel}</em></p>`;
   const cb=document.createElement("button");cb.className="modal-btn ghost";cb.textContent="Cancel";
-  cb.onclick=()=>{_pendingJSN=null;jsnC.innerHTML="";closeModal();};
+  cb.onclick=()=>{_pendingJSN=null;_pendingJSNActionCard=null;jsnC.innerHTML="";closeModal();};
   bx.appendChild(cb);ov.appendChild(bx);jsnC.appendChild(ov);
-  // Pass both cardIdx and cardId for reliable lookup
   channel.publish("jsn_prompt",{targetIdx:targetPlayerIdx,attackerIdx:myPlayerIdx,actionLabel,cardIdx,cardId});
 }
 function showJSNPrompt(actionLabel,attackerIdx){
