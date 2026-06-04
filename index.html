@@ -932,8 +932,9 @@ function handleAction(card,cardIdx){
     openModal({type:"rent",cardIdx,rentColors:card.rentColors});
   } else if(card.name==="House"||card.name==="Hotel"){
     openModal({type:"improvement",cardIdx,improvType:card.name.toLowerCase()});
+  } else if(card.name==="Forced Deal"){
+    openModal({type:"forcedDeal",cardIdx});
   } else if(card.name==="Double Rent"){
-    // Bank as money equivalent
     handleBank();
   } else {
     handleBank();
@@ -1082,7 +1083,61 @@ function renderModal(){
     });
     addBtn("Cancel","ghost",closeModal);
   }
-  else if(m.type==="improvement"){
+  else if(m.type==="forcedDeal"){
+    // Step 1: pick target player
+    if(modalStep.targetId===undefined){
+      addTitle("Forced Deal - Pick Target");
+      addSub("Pick a player to swap a property with:");
+      const validTargets=others.filter(p=>Object.values(p.properties).flat().length>0);
+      if(validTargets.length===0){ const d=document.createElement("div"); d.style.cssText="color:#f66;font-size:12px"; d.textContent="No players have properties!"; box.appendChild(d); }
+      validTargets.forEach(p=>{ addBtn(p.name,"accent",()=>{ modalStep.targetId=p.id; renderModal(); }); });
+      addBtn("Cancel","ghost",closeModal);
+    }
+    // Step 2: pick THEIR property to take
+    else if(modalStep.theirColor===undefined){
+      const target=G.players[modalStep.targetId];
+      const stealable=Object.entries(target.properties).filter(([c,a])=>a.length>0&&a.length<PROP_COLORS[c].needed);
+      addTitle("Forced Deal - Pick Their Property");
+      addSub("Pick which of "+target.name+"'s properties you want:");
+      if(stealable.length===0){ const d=document.createElement("div"); d.style.cssText="color:#f66;font-size:12px"; d.textContent="No incomplete sets to take!"; box.appendChild(d); }
+      stealable.forEach(([c,a])=>{
+        const col=PROP_COLORS[c];
+        addColorBtn(col.label+" ("+a.length+" cards)", col.color, col.text, ()=>{ modalStep.theirColor=c; renderModal(); });
+      });
+      addBtn("Back","ghost",()=>{ modalStep.targetId=undefined; renderModal(); });
+      addBtn("Cancel","ghost",closeModal);
+    }
+    // Step 3: pick which of THEIR cards in that color
+    else if(modalStep.theirPropIdx===undefined){
+      const target=G.players[modalStep.targetId];
+      const props=target.properties[modalStep.theirColor]||[];
+      addTitle("Forced Deal - Pick Their Card");
+      props.forEach((c,i)=>{ addBtn(c.name,"ghost",()=>{ modalStep.theirPropIdx=i; renderModal(); }); });
+      addBtn("Back","ghost",()=>{ modalStep.theirColor=undefined; renderModal(); });
+      addBtn("Cancel","ghost",closeModal);
+    }
+    // Step 4: pick YOUR property to give
+    else if(modalStep.myColor===undefined){
+      const myStealable=Object.entries(me.properties).filter(([c,a])=>a.length>0&&a.length<PROP_COLORS[c].needed);
+      addTitle("Forced Deal - Give Your Property");
+      addSub("Pick one of your properties to give in return:");
+      if(myStealable.length===0){ const d=document.createElement("div"); d.style.cssText="color:#f66;font-size:12px"; d.textContent="You have no incomplete sets to give!"; box.appendChild(d); }
+      myStealable.forEach(([c,a])=>{
+        const col=PROP_COLORS[c];
+        addColorBtn(col.label+" ("+a.length+" cards)", col.color, col.text, ()=>{ modalStep.myColor=c; renderModal(); });
+      });
+      addBtn("Back","ghost",()=>{ modalStep.theirPropIdx=undefined; renderModal(); });
+      addBtn("Cancel","ghost",closeModal);
+    }
+    // Step 5: pick which of YOUR cards in that color
+    else {
+      const props=me.properties[modalStep.myColor]||[];
+      addTitle("Forced Deal - Pick Your Card to Give");
+      props.forEach((c,i)=>{ addBtn(c.name,"ghost",()=>resolveModal("forcedDeal",i)); });
+      addBtn("Back","ghost",()=>{ modalStep.myColor=undefined; renderModal(); });
+      addBtn("Cancel","ghost",closeModal);
+    }
+  }
     const validColors=Object.entries(me.properties)
       .filter(([c,a])=>a.length>=PROP_COLORS[c].needed)
       .filter(([c])=>{
@@ -1242,7 +1297,27 @@ function resolveModal(action, arg1, arg2){
     selectedCardIdx=-1;
     broadcastGame(); closeModal();
   }
-  else if(action==="discard"){
+  else if(action==="forcedDeal"){
+    const myPropIdx=arg1;
+    G=deepClone(G);
+    const p=G.players[myPlayerIdx];
+    const t=G.players[modalStep.targetId];
+    // Take their card
+    const [theirCard]=t.properties[modalStep.theirColor].splice(modalStep.theirPropIdx,1);
+    if(!p.properties[modalStep.theirColor]) p.properties[modalStep.theirColor]=[];
+    p.properties[modalStep.theirColor].push(theirCard);
+    // Give our card
+    const [myCard]=p.properties[modalStep.myColor].splice(myPropIdx,1);
+    if(!t.properties[modalStep.myColor]) t.properties[modalStep.myColor]=[];
+    t.properties[modalStep.myColor].push(myCard);
+    // Discard the Forced Deal card
+    p.hand.splice(m.cardIdx,1);
+    G.actionsLeft--;
+    G.log=[`${p.name} used Forced Deal — swapped ${myCard.name} for ${theirCard.name} with ${t.name}!`,...G.log.slice(0,19)];
+    selectedCardIdx=-1;
+    if(checkWinner(p)) G.winner=p.name;
+    broadcastGame(); closeModal();
+  }
     const sel=modalStep.discardSel||[];
     if(sel.length!==m.excess) return;
     G=deepClone(G);
