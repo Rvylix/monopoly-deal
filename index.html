@@ -1319,6 +1319,7 @@ function resolveModal(action, arg1, arg2){
     if(checkWinner(p)) G.winner=p.name;
     broadcastGame(); closeModal();
   }
+  else if(action==="discard"){
     const sel=modalStep.discardSel||[];
     if(sel.length!==m.excess) return;
     G=deepClone(G);
