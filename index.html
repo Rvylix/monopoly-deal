@@ -384,35 +384,47 @@ function addLog(g,text,pi,sys=false){g.log=[{text,pi,sys},...(g.log||[]).slice(0
 // payPlayer — THE SINGLE SOURCE OF TRUTH for all money/property transfers.
 //
 // Rules enforced:
-//   1. Bank: smallest bills paid first. No change given — creditor keeps overpay.
-//   2. Properties (if bank short): prefer the single cheapest card that covers
-//      the remaining debt. Only take multiple cards if no single card covers it.
-//      Example: owed $2M, properties = Vermont($1M) + Boardwalk($4M):
-//        → takes Boardwalk only ($4M), NOT Vermont + Boardwalk ($5M total).
-//   3. All bank mutations are atomic (no mid-loop side effects).
-//   4. Never takes more property cards than strictly necessary.
+//   1. Bank: find the fewest cards that cover the debt. Prefer a single card
+//      that covers the owed amount over multiple smaller cards.
+//      Example: owed=$3M, bank=[$2M,$2M,$4M] → pays $4M only (not $2M+$2M).
+//   2. Properties (if bank short): same single-cover preference.
+//   3. No change given — creditor keeps any overpay.
+//   4. All mutations are atomic.
 //   5. owed<=0 is a no-op.
 //
-// ALL rent, birthday, debt collector, and future payment calls MUST use this.
+// ALL rent, birthday, debt collector, and any future payment MUST use this.
 // ─────────────────────────────────────────────────────────────────────────────
 function payPlayer(debtor,creditor,owed){
   if(owed<=0)return 0;
   let paid=0;
 
-  // ── STEP 1: Pay from bank (smallest bills first) ─────────────────────────
+  // ── STEP 1: Pay from bank ────────────────────────────────────────────────
+  // Strategy: same as properties — prefer single card that covers debt first,
+  // then fall back to smallest-first multi-card.
+  const sortedBank=[...debtor.bank].sort((a,b)=>a.value-b.value);
+
+  // Check if a single bank card covers the full owed amount
+  const singleBankCover=sortedBank.find(c=>c.value>=owed);
+  if(singleBankCover){
+    // Pay with just this one card
+    debtor.bank=debtor.bank.filter(c=>c.id!==singleBankCover.id);
+    creditor.bank.push(singleBankCover);
+    return singleBankCover.value;
+  }
+
+  // No single bank card covers it — pay smallest first until covered
   const kept=[];
   const give=[];
-  const sortedBank=[...debtor.bank].sort((a,b)=>a.value-b.value);
   for(const c of sortedBank){
     if(paid>=owed) kept.push(c);
     else{give.push(c);paid+=c.value;}
   }
-  // Commit atomically — prevents mid-loop cross-contamination on multi-player payments
+  // Commit atomically
   debtor.bank=kept;
   creditor.bank=[...creditor.bank,...give];
   if(paid>=owed)return paid;
 
-  // ── STEP 2: Pay from properties if still short ───────────────────────────
+  // ── STEP 2: Still short — pay from properties ────────────────────────────
   const remaining=owed-paid;
   const allProps=[];
   Object.entries(debtor.properties).forEach(([color,cards])=>{
@@ -420,11 +432,10 @@ function payPlayer(debtor,creditor,owed){
   });
   allProps.sort((a,b)=>a.card.value-b.card.value);
 
-  // First: find the single cheapest property that alone covers the remaining debt.
-  // This is the correct Monopoly Deal behaviour — pay with fewest cards possible.
-  const singleCover=allProps.find(({card})=>card.value>=remaining);
-  if(singleCover){
-    const{color,card}=singleCover;
+  // Prefer single property that covers the remaining debt
+  const singlePropCover=allProps.find(({card})=>card.value>=remaining);
+  if(singlePropCover){
+    const{color,card}=singlePropCover;
     const arr=debtor.properties[color];
     const pos=arr.findIndex(c=>c.id===card.id);
     if(pos>=0){
@@ -436,7 +447,7 @@ function payPlayer(debtor,creditor,owed){
     return paid;
   }
 
-  // Fallback: no single property covers the debt — take cheapest cards in sequence.
+  // No single property covers it — take cheapest properties in sequence
   for(const{color,card}of allProps){
     if(paid>=owed)break;
     const arr=debtor.properties[color];
