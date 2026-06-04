@@ -451,22 +451,32 @@ async function subscribeRoom(){
     document.getElementById("jsnContainer").innerHTML="";
     if(msg.data.used){
       G=clone(G);
-      // 1. Discard the JSN card from target's hand
+      // 1. Discard JSN card from target's hand
       const t=G.players[msg.data.targetIdx];
       const jsnIdx=t.hand.findIndex(c=>c.name==="Just Say No");
       if(jsnIdx>=0){const[j]=t.hand.splice(jsnIdx,1);G.discard.push(j);}
-      // 2. Discard the attacker's action card that triggered JSN
+      // 2. Find and discard the attacker's action card by ID (most reliable)
       const attacker=G.players[myPlayerIdx];
-      if(msg.data.cardIdx!==undefined&&msg.data.cardIdx>=0){
-        const aidx=attacker.hand.findIndex((c,i)=>i===msg.data.cardIdx);
-        if(aidx>=0){const[ac]=attacker.hand.splice(aidx,1);G.discard.push(ac);}
-        // Still costs an action
-        G.actionsLeft=Math.max(0,G.actionsLeft-1);
+      let acIdx=-1;
+      if(msg.data.cardId!=null){
+        acIdx=attacker.hand.findIndex(c=>c.id===msg.data.cardId);
       }
-      addLog(G,t.name+" used Just Say No! Action cancelled and discarded.",msg.data.targetIdx);
+      // Fallback to index if ID lookup fails
+      if(acIdx<0&&msg.data.cardIdx!=null){
+        acIdx=msg.data.cardIdx;
+      }
+      if(acIdx>=0&&acIdx<attacker.hand.length){
+        const[ac]=attacker.hand.splice(acIdx,1);
+        G.discard.push(ac);
+      }
+      // Costs 1 action
+      G.actionsLeft=Math.max(0,G.actionsLeft-1);
+      addLog(G,t.name+" used Just Say No! Action cancelled. Both cards discarded.",msg.data.targetIdx);
       _pendingJSN=null;
+      currentModal=null; // clear modal so closeModal doesn't conflict
       selectedCards=[];
-      bcastGame();closeModal();
+      document.getElementById("modalContainer").innerHTML="";
+      bcastGame();
     }else{
       // Allowed — execute the pending action
       if(_pendingJSN){_pendingJSN(null);_pendingJSN=null;}
@@ -518,11 +528,30 @@ function toggleHand(){
   document.getElementById("handToggleLbl").innerHTML="YOUR HAND ("+cnt+") "+(handOpen?"▼":"▲");
 }
 
+function drawCards(g,player,count){
+  // Draw `count` cards, reshuffling discard into deck if needed
+  let drawn=0;
+  for(let i=0;i<count;i++){
+    if(!g.deck.length){
+      if(!g.discard.length)break; // completely out of cards
+      g.deck=shuffle(g.discard);
+      g.discard=[];
+      addLog(g,"Discard pile shuffled back into draw pool.",null,true);
+    }
+    if(g.deck.length){player.hand.push(g.deck.pop());drawn++;}
+  }
+  return drawn;
+}
+
 function autoDraw(){
   if(!isMyTurn()||G.phase!=="draw")return;
-  G=clone(G);const p=G.players[myPlayerIdx];let d=0;
-  for(let i=0;i<2;i++){if(!G.deck.length){G.deck=shuffle(G.discard);G.discard=[];}if(G.deck.length){p.hand.push(G.deck.pop());d++;}}
-  G.phase="play";addLog(G,p.name+" drew "+d+" card(s).",myPlayerIdx);selectedCards=[];bcastGame();
+  G=clone(G);const p=G.players[myPlayerIdx];
+  // If hand is empty, draw 5; otherwise draw 2
+  const drawCount=p.hand.length===0?5:2;
+  const drawn=drawCards(G,p,drawCount);
+  G.phase="play";
+  addLog(G,p.name+" drew "+drawn+" card"+(drawn!==1?"s":"")+(drawCount===5?" (empty hand bonus)":"")+".",myPlayerIdx);
+  selectedCards=[];bcastGame();
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────
@@ -532,8 +561,14 @@ function renderGame(){
   renderLB();renderOpps();renderMyTable(me,myTurn);renderHand(me,myTurn);renderLog();
   // Buttons
   const sel=selectedCards.map(i=>me.hand[i]).filter(Boolean);
-  const canPlay=myTurn&&G.phase==="play"&&sel.length===1&&(sel[0].type==="property"||sel[0].type==="wild"||sel[0].type==="action");
-  const canBank=myTurn&&G.phase==="play"&&sel.length>0&&sel.some(c=>c.type==="money"||c.type==="action");
+  // Standard single-card play
+  const canPlay1=myTurn&&G.phase==="play"&&sel.length===1&&(sel[0].type==="property"||sel[0].type==="wild"||sel[0].type==="action");
+  // Double Rent combo: exactly 2 cards, one Rent + one Double Rent
+  const canPlay2=myTurn&&G.phase==="play"&&sel.length===2&&
+    sel.some(c=>c.type==="action"&&c.name.startsWith("Rent"))&&
+    sel.some(c=>c.type==="action"&&c.name==="Double Rent");
+  const canPlay=canPlay1||canPlay2;
+  const canBank=myTurn&&G.phase==="play"&&sel.length>0&&sel.every(c=>c.type==="money");
   const bp=document.getElementById("btnPlay");const be=document.getElementById("btnEnd");const bb=document.getElementById("btnBank");
   bp.style.display=myTurn&&G.phase==="play"?"inline-flex":"none";bp.disabled=!canPlay||G.actionsLeft===0;
   be.style.display=myTurn&&G.phase==="play"?"inline-flex":"none";
@@ -732,6 +767,7 @@ function renderLog(){
 // ── ACTIONS ───────────────────────────────────────────────────────────────
 function handleBankSelected(){
   if(!isMyTurn()||G.phase!=="play"||!selectedCards.length)return;
+  if(G.actionsLeft===0){showToast("No actions left!");return;}
   G=clone(G);const p=G.players[myPlayerIdx];
   // Sort descending so splicing doesn't shift indices
   const sorted=[...selectedCards].sort((a,b)=>b-a);
@@ -746,14 +782,33 @@ function handleBankSelected(){
   if(!toBank.length){selectedCards=[];renderGame();return;}
   const banked=[];
   for(const{i,c}of toBank){
-    p.hand.splice(i,1);p.bank.push(c);banked.push("$"+c.value+"M");G.actionsLeft--;
+    p.hand.splice(i,1);p.bank.push(c);banked.push("$"+c.value+"M");
   }
+  // Banking ALL selected cards costs exactly 1 action regardless of how many cards
+  G.actionsLeft--;
   addLog(G,p.name+" banked "+banked.join(", ")+".",myPlayerIdx);
   selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();
 }
 function handlePlaySelected(){
   if(!isMyTurn()||G.phase!=="play"||!selectedCards.length||G.actionsLeft===0)return;
-  const me=G.players[myPlayerIdx];const ci=selectedCards[0];const card=me.hand[ci];if(!card)return;
+  const me=G.players[myPlayerIdx];
+
+  // Check for Double Rent + Rent combo (exactly 2 cards selected)
+  if(selectedCards.length===2){
+    const cards=selectedCards.map(i=>me.hand[i]).filter(Boolean);
+    const rentCard=cards.find(c=>c.type==="action"&&c.name.startsWith("Rent"));
+    const doubleCard=cards.find(c=>c.type==="action"&&c.name==="Double Rent");
+    if(rentCard&&doubleCard){
+      const rentIdx=me.hand.indexOf(rentCard);
+      const doubleIdx=me.hand.indexOf(doubleCard);
+      openModal({type:"rent",cardIdx:rentIdx,doubleRentIdx:doubleIdx,rentColors:rentCard.rentColors,doubled:true});
+      return;
+    }
+    showToast("Select 1 card to play, or Rent + Double Rent together.");
+    return;
+  }
+
+  const ci=selectedCards[0];const card=me.hand[ci];if(!card)return;
   if(card.type==="money"){handleBankSelected();return;}
   if(card.type==="property"){playProp(ci,card.color);return;}
   if(card.type==="wild"){openModal({type:"pickWild",cardIdx:ci,colors:card.colors});return;}
@@ -775,7 +830,14 @@ function playProp(ci,color){
   selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
 }
 function handleAction(card,ci){
-  if(card.name==="Pass Go"){G=clone(G);const p=G.players[myPlayerIdx];p.hand.splice(ci,1);G.discard.push(card);for(let i=0;i<2;i++){if(!G.deck.length){G.deck=shuffle(G.discard);G.discard=[];}if(G.deck.length)p.hand.push(G.deck.pop());}G.actionsLeft--;addLog(G,p.name+" played Pass Go.",myPlayerIdx);selectedCards=[];bcastGame();}
+  if(card.name==="Pass Go"){
+    G=clone(G);const p=G.players[myPlayerIdx];
+    p.hand.splice(ci,1);G.discard.push(card);
+    const drawn=drawCards(G,p,2);
+    G.actionsLeft--;
+    addLog(G,p.name+" played Pass Go — drew "+drawn+" card"+(drawn!==1?"s":"")+".",myPlayerIdx);
+    selectedCards=[];bcastGame();
+  }
   else if(card.name==="Its My Birthday")openModal({type:"birthday",cardIdx:ci});
   else if(card.name==="Debt Collector")openModal({type:"debtCollector",cardIdx:ci});
   else if(card.name==="Sly Deal")openModal({type:"slyDeal",cardIdx:ci});
@@ -783,7 +845,8 @@ function handleAction(card,ci){
   else if(card.name.startsWith("Rent"))openModal({type:"rent",cardIdx:ci,rentColors:card.rentColors});
   else if(card.name==="House"||card.name==="Hotel")openModal({type:"improvement",cardIdx:ci,improvType:card.name.toLowerCase()});
   else if(card.name==="Forced Deal")openModal({type:"forcedDeal",cardIdx:ci});
-  else if(card.name==="Just Say No")showToast("Just Say No can only cancel an action against you!");
+  else if(card.name==="Just Say No")showToast("Just Say No can only cancel an action against you!")
+  else if(card.name==="Double Rent")showToast("Double Rent must be played together with a Rent card. Select both, then Play Card.")
   else handleBankSelected();
 }
 function handleEndTurn(){
@@ -795,14 +858,17 @@ function advanceTurn(){
   addLog(G,"It is "+G.players[G.currentPlayer].name+"'s turn.",G.currentPlayer,true);selectedCards=[];bcastGame();closeModal();
 }
 
-// ── JSN — targetPlayerIdx=null means "skip that player" (they used JSN) ──
-// _pendingJSN is now called with (skipPlayerIdx) where null means no skip
+// ── JSN ───────────────────────────────────────────────────────────────────
 function checkJSN(targetPlayerIdx,actionLabel,cardIdx,onConfirm){
   const target=G.players[targetPlayerIdx];
   if(!target.hand.some(c=>c.name==="Just Say No")){
     onConfirm(null);return;
   }
   _pendingJSN=onConfirm;
+  // Store the card's unique ID so we can find it even if index shifts
+  const attacker=G.players[myPlayerIdx];
+  const actionCard=attacker.hand[cardIdx];
+  const cardId=actionCard?actionCard.id:null;
   const jsnC=document.getElementById("jsnContainer");jsnC.innerHTML="";
   const ov=document.createElement("div");ov.className="jsn-overlay";
   const bx=document.createElement("div");bx.className="jsn-box";
@@ -810,7 +876,8 @@ function checkJSN(targetPlayerIdx,actionLabel,cardIdx,onConfirm){
   const cb=document.createElement("button");cb.className="modal-btn ghost";cb.textContent="Cancel";
   cb.onclick=()=>{_pendingJSN=null;jsnC.innerHTML="";closeModal();};
   bx.appendChild(cb);ov.appendChild(bx);jsnC.appendChild(ov);
-  channel.publish("jsn_prompt",{targetIdx:targetPlayerIdx,attackerIdx:myPlayerIdx,actionLabel,cardIdx});
+  // Pass both cardIdx and cardId for reliable lookup
+  channel.publish("jsn_prompt",{targetIdx:targetPlayerIdx,attackerIdx:myPlayerIdx,actionLabel,cardIdx,cardId});
 }
 function showJSNPrompt(actionLabel,attackerIdx){
   jsnBeep();const attacker=G.players[attackerIdx];
@@ -860,16 +927,27 @@ function renderModal(){
   else if(m.type==="debtCollector"){T("💸 Debt Collector");S("Collect $5M from:");others.forEach(p=>{B(p.name+" (bank $"+bankTotal(p)+"M)","accent",()=>checkJSN(p.id,"Debt Collector $5M",m.cardIdx,()=>resolveM("debtCollector",p.id)));});B("Cancel","ghost",closeModal);}
   else if(m.type==="rent"){
     const avail=(m.rentColors||[]).filter(c=>(me.properties[c]||[]).length>0);
-    if(!modalStep.color){T("🏠 Charge Rent");S("Pick color:");if(!avail.length)W("No matching properties!");avail.forEach(c=>{const p=PC[c];CB(p.label+" — $"+getRent(me,c)+"M ("+((me.properties[c]||[]).length)+"/"+p.needed+")",p.bg,p.fg,()=>{modalStep.color=c;renderModal();});});B("Cancel","ghost",closeModal);}
-    else{
-      const color=modalStep.color;const rent=getRent(me,color);const isAll=(m.rentColors||[]).length>4;
+    const doubled=!!m.doubled;
+    if(!modalStep.color){
+      T(doubled?"🏠 Charge Rent (DOUBLED!)":"🏠 Charge Rent");
+      S(doubled?"Double Rent active — rent will be ×2, costs 1 action total.":"Pick color:");
+      if(!avail.length)W("No matching properties!");
+      avail.forEach(c=>{
+        const p=PC[c];const base=getRent(me,c);const display=doubled?base+"M → $"+(base*2)+"M (×2)":base;
+        CB(p.label+" — $"+display+"M ("+((me.properties[c]||[]).length)+"/"+p.needed+")",p.bg,p.fg,()=>{modalStep.color=c;renderModal();});
+      });
+      B("Cancel","ghost",closeModal);
+    }else{
+      const color=modalStep.color;const baseRent=getRent(me,color);const rent=doubled?baseRent*2:baseRent;
+      const isAll=(m.rentColors||[]).length>4;
       if(isAll){
-        // Rent (All): check each player for JSN one at a time
-        T("Charge All Players?");S("Charge $"+rent+"M ("+PC[color].label+") from everyone?");
-        B("Charge Everyone!","accent",()=>resolveRentAll(m,color,rent));B("Cancel","ghost",closeModal);
+        T(doubled?"Charge All Players (DOUBLED)":"Charge All Players?");
+        S("Charge $"+rent+"M ("+PC[color].label+")"+(doubled?" [×2 with Double Rent]":"")+" from everyone?");
+        B("Charge Everyone!","accent",()=>resolveRentAll(m,color,rent,doubled));B("Cancel","ghost",closeModal);
       }else{
-        T("Pick player");S("$"+rent+"M for "+PC[color].label+":");
-        others.forEach(p=>{B(p.name+" (bank $"+bankTotal(p)+"M)","accent",()=>checkJSN(p.id,"Rent $"+rent+"M on "+PC[color].label,m.cardIdx,skip=>resolveM("rentOne",p.id,null,skip)));});B("Cancel","ghost",closeModal);
+        T("Pick player to charge");S("$"+rent+"M for "+PC[color].label+(doubled?" [DOUBLED]":"")+":");
+        others.forEach(p=>{B(p.name+" (bank $"+bankTotal(p)+"M)","accent",()=>checkJSN(p.id,"Rent $"+rent+"M on "+PC[color].label+(doubled?" [×2]":""),m.cardIdx,()=>resolveM("rentOne",p.id)));});
+        B("Cancel","ghost",closeModal);
       }
     }
   }
@@ -877,20 +955,20 @@ function renderModal(){
     if(modalStep.targetId===undefined){T("🦊 Sly Deal");others.forEach(p=>{B(p.name,"accent",()=>{modalStep.targetId=p.id;renderModal();});});B("Cancel","ghost",closeModal);}
     else{const tgt=G.players[modalStep.targetId];const stealable=Object.entries(tgt.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);
       if(!modalStep.color){T("Pick their color");if(!stealable.length)W("No incomplete sets!");stealable.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.color=c;renderModal();});});B("Back","ghost",()=>{modalStep.targetId=undefined;renderModal();});B("Cancel","ghost",closeModal);}
-      else{T("Pick their card");(tgt.properties[modalStep.color]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Sly Deal",m.cardIdx,skip=>{ if(skip!==null)closeModal(); else resolveM("slyDeal",i); }));});B("Back","ghost",()=>{modalStep.color=undefined;renderModal();});B("Cancel","ghost",closeModal);}
+      else{T("Pick their card");(tgt.properties[modalStep.color]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Sly Deal",m.cardIdx,()=>resolveM("slyDeal",i)));});B("Back","ghost",()=>{modalStep.color=undefined;renderModal();});B("Cancel","ghost",closeModal);}
     }
   }
   else if(m.type==="dealBreaker"){
     const sets=[];G.players.forEach((p,pi)=>{if(pi===myPlayerIdx)return;Object.entries(p.properties).forEach(([c,a])=>{if(a.length>=PC[c].needed)sets.push({player:p,playerIdx:pi,color:c});});});
     T("💥 Deal Breaker");if(!sets.length)W("No complete sets!");
-    sets.forEach(({player,playerIdx,color})=>{const p=PC[color];CB(player.name+"'s "+p.label,p.bg,p.fg,()=>checkJSN(playerIdx,"Deal Breaker",m.cardIdx,skip=>{if(skip!==null)closeModal();else resolveM("dealBreaker",playerIdx,color);}));});B("Cancel","ghost",closeModal);
+    sets.forEach(({player,playerIdx,color})=>{const p=PC[color];CB(player.name+"'s "+p.label,p.bg,p.fg,()=>checkJSN(playerIdx,"Deal Breaker",m.cardIdx,()=>resolveM("dealBreaker",playerIdx,color)));});B("Cancel","ghost",closeModal);
   }
   else if(m.type==="forcedDeal"){
     if(modalStep.targetId===undefined){T("🔄 Forced Deal");const vt=others.filter(p=>Object.entries(p.properties).some(([c,a])=>a.length>0&&a.length<PC[c].needed));if(!vt.length)W("No swappable!");vt.forEach(p=>{B(p.name,"accent",()=>{modalStep.targetId=p.id;renderModal();});});B("Cancel","ghost",closeModal);}
     else if(modalStep.theirColor===undefined){const tgt=G.players[modalStep.targetId];const st=Object.entries(tgt.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);T("Their property");if(!st.length)W("No incomplete sets!");st.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.theirColor=c;renderModal();});});B("Back","ghost",()=>{modalStep.targetId=undefined;renderModal();});B("Cancel","ghost",closeModal);}
     else if(modalStep.theirPropIdx===undefined){T("Pick their card");(G.players[modalStep.targetId].properties[modalStep.theirColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>{modalStep.theirPropIdx=i;renderModal();});});B("Back","ghost",()=>{modalStep.theirColor=undefined;renderModal();});B("Cancel","ghost",closeModal);}
     else if(modalStep.myColor===undefined){const sw=Object.entries(me.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);T("Your property to give");if(!sw.length)W("No incomplete sets!");sw.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.myColor=c;renderModal();});});B("Back","ghost",()=>{modalStep.theirPropIdx=undefined;renderModal();});B("Cancel","ghost",closeModal);}
-    else{T("Pick your card");(me.properties[modalStep.myColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Forced Deal",m.cardIdx,skip=>{if(skip!==null)closeModal();else resolveM("forcedDeal",i);}));});B("Back","ghost",()=>{modalStep.myColor=undefined;renderModal();});B("Cancel","ghost",closeModal);}
+    else{T("Pick your card");(me.properties[modalStep.myColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Forced Deal",m.cardIdx,()=>resolveM("forcedDeal",i)));});B("Back","ghost",()=>{modalStep.myColor=undefined;renderModal();});B("Cancel","ghost",closeModal);}
   }
   else if(m.type==="improvement"){
     const valid=Object.entries(me.properties).filter(([c,a])=>a.length>=PC[c].needed).filter(([c])=>{const im=me.improvements[c]||{};return m.improvType==="house"?!im.house:im.house&&!im.hotel;});
@@ -913,34 +991,65 @@ function renderModal(){
   }
 }
 
-// ── Rent All — check JSN for each player, collect from those who don't use it
-function resolveRentAll(m,color,rent){
+function resolveRentAll(m,color,rent,doubled=false){
   G=clone(G);const p=G.players[myPlayerIdx];
   const targets=G.players.filter((_,i)=>i!==myPlayerIdx);
-  // Simple: collect from all, JSN handled per-player via broadcast system above
-  // (For Rent All, we just collect without JSN check to keep it simple in pass-play mode)
   targets.forEach(t=>payPlayer(t,p,rent));
-  p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" charged $"+rent+"M ("+PC[color].label+") to everyone!",myPlayerIdx);
+  // Discard rent card
+  p.hand.splice(m.cardIdx,1);
+  // If doubled, also discard the Double Rent card (find by index stored in modal)
+  if(doubled&&m.doubleRentIdx!=null){
+    // Index may have shifted by 1 if cardIdx < doubleRentIdx
+    const drIdx=m.doubleRentIdx>(m.cardIdx)?m.doubleRentIdx-1:m.doubleRentIdx;
+    if(drIdx>=0&&drIdx<p.hand.length&&p.hand[drIdx]?.name==="Double Rent"){
+      const[dr]=p.hand.splice(drIdx,1);G.discard.push(dr);
+    } else {
+      // Fallback: find by name
+      const fallback=p.hand.findIndex(c=>c.name==="Double Rent");
+      if(fallback>=0){const[dr]=p.hand.splice(fallback,1);G.discard.push(dr);}
+    }
+  }
+  G.actionsLeft--; // 1 action total even with Double Rent
+  addLog(G,p.name+" charged $"+rent+"M ("+PC[color].label+")"+(doubled?" [DOUBLED]":"")+" to everyone!",myPlayerIdx);
   selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
 }
 
-function resolveM(action,arg1,arg2,skipPlayerIdx=null){
+function resolveM(action,arg1,arg2){
   const m=currentModal;if(!m)return;const me=G.players[myPlayerIdx];
   if(action==="birthday"){
     G=clone(G);const p=G.players[myPlayerIdx];
-    G.players.forEach((t,ti)=>{if(ti===myPlayerIdx||ti===skipPlayerIdx)return;payPlayer(t,p,2);});
-    p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" played Birthday! Collected $2M from "+(skipPlayerIdx!==null?"most":"all")+" players.",myPlayerIdx);
+    G.players.forEach((t,ti)=>{if(ti===myPlayerIdx)return;payPlayer(t,p,2);});
+    p.hand.splice(m.cardIdx,1);G.actionsLeft--;
+    addLog(G,p.name+" played Birthday! Collected $2M from all players.",myPlayerIdx);
     selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
   }
   else if(action==="debtCollector"){
-    if(skipPlayerIdx!==null){addLog(G,G.players[arg1].name+" used Just Say No! Debt Collector cancelled.",arg1);bcastGame();closeModal();return;}
-    G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[arg1];const paid=payPlayer(t,p,5);p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" used Debt Collector on "+t.name+"! Got $"+paid+"M.",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
+    G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[arg1];
+    const paid=payPlayer(t,p,5);
+    p.hand.splice(m.cardIdx,1);G.actionsLeft--;
+    addLog(G,p.name+" used Debt Collector on "+t.name+"! Got $"+paid+"M.",myPlayerIdx);
+    selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
   }
   else if(action==="rentOne"){
-    const targetId=arg1;
-    if(skipPlayerIdx!==null){addLog(G,G.players[targetId].name+" used Just Say No! Rent cancelled.",targetId);bcastGame();closeModal();return;}
-    G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[targetId];const color=modalStep.color;const rent=getRent(p,color);
-    const paid=payPlayer(t,p,rent);p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" charged "+t.name+" $"+rent+"M. Paid $"+paid+"M.",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
+    G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[arg1];
+    const color=modalStep.color;const baseRent=getRent(p,color);
+    const rent=m.doubled?baseRent*2:baseRent;
+    const paid=payPlayer(t,p,rent);
+    // Discard rent card
+    p.hand.splice(m.cardIdx,1);
+    // If doubled, discard Double Rent card too
+    if(m.doubled&&m.doubleRentIdx!=null){
+      const drIdx=m.doubleRentIdx>(m.cardIdx)?m.doubleRentIdx-1:m.doubleRentIdx;
+      if(drIdx>=0&&drIdx<p.hand.length&&p.hand[drIdx]?.name==="Double Rent"){
+        const[dr]=p.hand.splice(drIdx,1);G.discard.push(dr);
+      } else {
+        const fallback=p.hand.findIndex(c=>c.name==="Double Rent");
+        if(fallback>=0){const[dr]=p.hand.splice(fallback,1);G.discard.push(dr);}
+      }
+    }
+    G.actionsLeft--; // 1 action total
+    addLog(G,p.name+" charged "+t.name+" $"+rent+"M ("+PC[color].label+")"+(m.doubled?" [DOUBLED]":"")+" — paid $"+paid+"M.",myPlayerIdx);
+    selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
   }
   else if(action==="slyDeal"){
     G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[modalStep.targetId];const color=modalStep.color;const[stolen]=t.properties[color].splice(arg1,1);if(!p.properties[color])p.properties[color]=[];p.properties[color].push(stolen);p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" Sly Dealt "+stolen.name+" from "+t.name+"!",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
