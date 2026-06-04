@@ -312,8 +312,8 @@ let masterVolume=0.4;
 // ── DECK BUILDER — verified against original Monopoly Deal card list ──────
 function buildDeck(){
   const c=[];
-  // Money: 6×$1, 5×$2, 3×$3, 3×$4, 2×$5, 2×$6, 2×$7, 2×$8, 2×$9, 2×$10 = 29 money cards
-  [[1,6],[2,5],[3,3],[4,3],[5,2],[6,2],[7,2],[8,2],[9,2],[10,2]].forEach(([v,cnt])=>{
+  // Money: 6×$1, 5×$2, 3×$3, 3×$4, 2×$5, 1×$10 = 20 money cards
+  [[1,6],[2,5],[3,3],[4,3],[5,2],[10,1]].forEach(([v,cnt])=>{
     for(let i=0;i<cnt;i++) c.push(mk("money",{value:v}));
   });
   // Properties — exact original set (28 property cards)
@@ -380,24 +380,41 @@ function setsCount(p){return Object.entries(p.properties).filter(([c,a])=>a.leng
 function clone(o){return JSON.parse(JSON.stringify(o));}
 function addLog(g,text,pi,sys=false){g.log=[{text,pi,sys},...(g.log||[]).slice(0,39)];}
 
-// Pay with LOWEST denomination first (smallest bills first)
+// Pay with LOWEST denomination first. No change given — overpay is the debtor's loss.
+// Returns actual amount paid.
 function payPlayer(debtor,creditor,owed){
   let paid=0;
-  // Sort bank ascending (lowest first)
-  const sb=[...debtor.bank].sort((a,b)=>a.value-b.value);debtor.bank=[];
-  for(const c of sb){
-    if(paid>=owed) debtor.bank.push(c);
-    else{creditor.bank.push(c);paid+=c.value;}
+  const kept=[];
+  const give=[];
+  // Sort ascending — smallest bills first to minimise overpay
+  const sorted=[...debtor.bank].sort((a,b)=>a.value-b.value);
+  for(const c of sorted){
+    if(paid>=owed){
+      kept.push(c);
+    }else{
+      give.push(c);
+      paid+=c.value;
+    }
   }
+  // Commit bank changes atomically
+  debtor.bank=kept;
+  creditor.bank=[...creditor.bank,...give];
   if(paid>=owed)return paid;
-  // Use cheapest properties to cover remainder
-  const ap=[];Object.entries(debtor.properties).forEach(([color,cards])=>cards.forEach(c=>ap.push({color,card:c})));
+  // Still short — use cheapest properties
+  const ap=[];
+  Object.entries(debtor.properties).forEach(([color,cards])=>{
+    cards.forEach(c=>ap.push({color,card:c}));
+  });
   ap.sort((a,b)=>a.card.value-b.card.value);
   for(const{color,card}of ap){
     if(paid>=owed)break;
-    const arr=debtor.properties[color];const pos=arr.indexOf(card);if(pos===-1)continue;
-    arr.splice(pos,1);if(!creditor.properties[color])creditor.properties[color]=[];
-    creditor.properties[color].push(card);paid+=card.value;
+    const arr=debtor.properties[color];
+    const pos=arr.findIndex(c=>c.id===card.id);
+    if(pos===-1)continue;
+    arr.splice(pos,1);
+    if(!creditor.properties[color])creditor.properties[color]=[];
+    creditor.properties[color].push(card);
+    paid+=card.value;
   }
   return paid;
 }
@@ -561,14 +578,15 @@ function renderGame(){
   renderLB();renderOpps();renderMyTable(me,myTurn);renderHand(me,myTurn);renderLog();
   // Buttons
   const sel=selectedCards.map(i=>me.hand[i]).filter(Boolean);
-  // Standard single-card play
+  // Single card play: property, wild, or action card
   const canPlay1=myTurn&&G.phase==="play"&&sel.length===1&&(sel[0].type==="property"||sel[0].type==="wild"||sel[0].type==="action");
   // Double Rent combo: exactly 2 cards, one Rent + one Double Rent
   const canPlay2=myTurn&&G.phase==="play"&&sel.length===2&&
     sel.some(c=>c.type==="action"&&c.name.startsWith("Rent"))&&
     sel.some(c=>c.type==="action"&&c.name==="Double Rent");
   const canPlay=canPlay1||canPlay2;
-  const canBank=myTurn&&G.phase==="play"&&sel.length>0&&sel.every(c=>c.type==="money");
+  // Bank: any single non-JSN card (money, property, wild, action except JSN)
+  const canBank=myTurn&&G.phase==="play"&&sel.length===1&&sel[0].name!=="Just Say No";
   const bp=document.getElementById("btnPlay");const be=document.getElementById("btnEnd");const bb=document.getElementById("btnBank");
   bp.style.display=myTurn&&G.phase==="play"?"inline-flex":"none";bp.disabled=!canPlay||G.actionsLeft===0;
   be.style.display=myTurn&&G.phase==="play"?"inline-flex":"none";
@@ -718,8 +736,21 @@ function renderHand(me){
     div.innerHTML=gcardInner(card,"hand");
     div.onclick=()=>{
       if(!isMyTurn()||G.phase!=="play")return;
-      if(selectedCards.includes(i))selectedCards=selectedCards.filter(x=>x!==i);
-      else selectedCards=[...selectedCards,i];
+      if(selectedCards.includes(i)){
+        selectedCards=selectedCards.filter(x=>x!==i);
+      }else{
+        // Allow 2-card selection only for Rent + Double Rent combo
+        const existing=selectedCards.map(j=>me.hand[j]).filter(Boolean);
+        const isRentCombo=existing.length===1&&(
+          (card.name==="Double Rent"&&existing[0].type==="action"&&existing[0].name.startsWith("Rent"))||
+          (card.type==="action"&&card.name.startsWith("Rent")&&existing[0].name==="Double Rent")
+        );
+        if(isRentCombo){
+          selectedCards=[...selectedCards,i];
+        }else{
+          selectedCards=[i]; // single select — replace
+        }
+      }
       renderGame();
     };
     container.appendChild(div);
@@ -769,24 +800,18 @@ function handleBankSelected(){
   if(!isMyTurn()||G.phase!=="play"||!selectedCards.length)return;
   if(G.actionsLeft===0){showToast("No actions left!");return;}
   G=clone(G);const p=G.players[myPlayerIdx];
-  // Sort descending so splicing doesn't shift indices
-  const sorted=[...selectedCards].sort((a,b)=>b-a);
-  const toBank=[];
-  // First pass: validate all selected cards can be banked
-  for(const i of sorted){
-    const c=p.hand[i];
-    if(!c)continue;
-    if(c.name==="Just Say No"){showToast("Just Say No cannot be banked!");selectedCards=[];renderGame();return;}
-    toBank.push({i,c});
-  }
-  if(!toBank.length){selectedCards=[];renderGame();return;}
-  const banked=[];
-  for(const{i,c}of toBank){
-    p.hand.splice(i,1);p.bank.push(c);banked.push("$"+c.value+"M");
-  }
-  // Banking ALL selected cards costs exactly 1 action regardless of how many cards
+  const idx=selectedCards[0];
+  const card=p.hand[idx];
+  if(!card){selectedCards=[];renderGame();return;}
+  if(card.name==="Just Say No"){showToast("Just Say No cannot be banked!");selectedCards=[];renderGame();return;}
+  // All non-JSN cards can be banked at face value
+  p.hand.splice(idx,1);
+  // Assign a bank value: money uses face value, others use card value field
+  const bankCard={...card}; // keep all fields including value
+  p.bank.push(bankCard);
   G.actionsLeft--;
-  addLog(G,p.name+" banked "+banked.join(", ")+".",myPlayerIdx);
+  const label=card.type==="money"?"$"+card.value+"M":(card.name||card.label||"card")+" ($"+card.value+"M)";
+  addLog(G,p.name+" banked "+label+".",myPlayerIdx);
   selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();
 }
 function handlePlaySelected(){
@@ -955,20 +980,42 @@ function renderModal(){
     if(modalStep.targetId===undefined){T("🦊 Sly Deal");others.forEach(p=>{B(p.name,"accent",()=>{modalStep.targetId=p.id;renderModal();});});B("Cancel","ghost",closeModal);}
     else{const tgt=G.players[modalStep.targetId];const stealable=Object.entries(tgt.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);
       if(!modalStep.color){T("Pick their color");if(!stealable.length)W("No incomplete sets!");stealable.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.color=c;renderModal();});});B("Back","ghost",()=>{modalStep.targetId=undefined;renderModal();});B("Cancel","ghost",closeModal);}
-      else{T("Pick their card");(tgt.properties[modalStep.color]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Sly Deal",m.cardIdx,()=>resolveM("slyDeal",i)));});B("Back","ghost",()=>{modalStep.color=undefined;renderModal();});B("Cancel","ghost",closeModal);}
+      else{
+        T("Pick their card");
+        const tgtName=tgt.name;
+        (tgt.properties[modalStep.color]||[]).forEach((c,i)=>{
+          const label="Sly Deal — stealing "+c.name+" ("+PC[modalStep.color].label+") from "+tgtName;
+          B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,label,m.cardIdx,()=>resolveM("slyDeal",i)));
+        });
+        B("Back","ghost",()=>{modalStep.color=undefined;renderModal();});B("Cancel","ghost",closeModal);
+      }
     }
   }
   else if(m.type==="dealBreaker"){
     const sets=[];G.players.forEach((p,pi)=>{if(pi===myPlayerIdx)return;Object.entries(p.properties).forEach(([c,a])=>{if(a.length>=PC[c].needed)sets.push({player:p,playerIdx:pi,color:c});});});
     T("💥 Deal Breaker");if(!sets.length)W("No complete sets!");
-    sets.forEach(({player,playerIdx,color})=>{const p=PC[color];CB(player.name+"'s "+p.label,p.bg,p.fg,()=>checkJSN(playerIdx,"Deal Breaker",m.cardIdx,()=>resolveM("dealBreaker",playerIdx,color)));});B("Cancel","ghost",closeModal);
+    sets.forEach(({player,playerIdx,color})=>{
+      const p=PC[color];
+      const label="Deal Breaker — stealing complete "+p.label+" set ("+G.players[playerIdx].properties[color].map(c=>c.name).join(", ")+") from "+player.name;
+      CB(player.name+"'s "+p.label+" (complete set)",p.bg,p.fg,()=>checkJSN(playerIdx,label,m.cardIdx,()=>resolveM("dealBreaker",playerIdx,color)));
+    });
+    B("Cancel","ghost",closeModal);
   }
   else if(m.type==="forcedDeal"){
     if(modalStep.targetId===undefined){T("🔄 Forced Deal");const vt=others.filter(p=>Object.entries(p.properties).some(([c,a])=>a.length>0&&a.length<PC[c].needed));if(!vt.length)W("No swappable!");vt.forEach(p=>{B(p.name,"accent",()=>{modalStep.targetId=p.id;renderModal();});});B("Cancel","ghost",closeModal);}
     else if(modalStep.theirColor===undefined){const tgt=G.players[modalStep.targetId];const st=Object.entries(tgt.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);T("Their property");if(!st.length)W("No incomplete sets!");st.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.theirColor=c;renderModal();});});B("Back","ghost",()=>{modalStep.targetId=undefined;renderModal();});B("Cancel","ghost",closeModal);}
     else if(modalStep.theirPropIdx===undefined){T("Pick their card");(G.players[modalStep.targetId].properties[modalStep.theirColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>{modalStep.theirPropIdx=i;renderModal();});});B("Back","ghost",()=>{modalStep.theirColor=undefined;renderModal();});B("Cancel","ghost",closeModal);}
     else if(modalStep.myColor===undefined){const sw=Object.entries(me.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);T("Your property to give");if(!sw.length)W("No incomplete sets!");sw.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.myColor=c;renderModal();});});B("Back","ghost",()=>{modalStep.theirPropIdx=undefined;renderModal();});B("Cancel","ghost",closeModal);}
-    else{T("Pick your card");(me.properties[modalStep.myColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Forced Deal",m.cardIdx,()=>resolveM("forcedDeal",i)));});B("Back","ghost",()=>{modalStep.myColor=undefined;renderModal();});B("Cancel","ghost",closeModal);}
+    else{
+      T("Pick your card to give");
+      const theirCard=G.players[modalStep.targetId].properties[modalStep.theirColor]?.[modalStep.theirPropIdx];
+      const theirName=theirCard?theirCard.name:"?";
+      (me.properties[modalStep.myColor]||[]).forEach((c,i)=>{
+        const label="Forced Deal — swapping "+c.name+" for "+theirName+" with "+G.players[modalStep.targetId].name;
+        B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,label,m.cardIdx,()=>resolveM("forcedDeal",i)));
+      });
+      B("Back","ghost",()=>{modalStep.myColor=undefined;renderModal();});B("Cancel","ghost",closeModal);
+    }
   }
   else if(m.type==="improvement"){
     const valid=Object.entries(me.properties).filter(([c,a])=>a.length>=PC[c].needed).filter(([c])=>{const im=me.improvements[c]||{};return m.improvType==="house"?!im.house:im.house&&!im.hotel;});
