@@ -43,18 +43,16 @@ input{font-family:inherit}
 #game::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(45deg,rgba(0,0,0,.03) 0,rgba(0,0,0,.03) 1px,transparent 0,transparent 50%);background-size:20px 20px;pointer-events:none;z-index:0}
 
 /* ── PLAYER ZONES (around the table edges) ── */
-/* Each player zone has: money box (red) + properties (dark blue) */
-
-/* TOP player */
-.zone-top{position:absolute;top:0;left:50%;transform:translateX(-50%);width:55%;z-index:2;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0 0}
+/* TOP player — horizontal scroll if many cards */
+.zone-top{position:absolute;top:0;left:50%;transform:translateX(-50%);width:55%;z-index:2;display:flex;flex-direction:row;align-items:flex-start;gap:8px;padding:6px 0 0;overflow-x:auto;max-height:45vh}
 /* BOTTOM = me */
 .zone-bottom{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:70%;z-index:2;display:flex;flex-direction:column;align-items:center;gap:3px;padding:0 0 4px}
 /* LEFT players */
-.zone-left{position:absolute;left:0;top:50%;transform:translateY(-50%);z-index:2;display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:0 0 0 4px;max-height:55vh}
+.zone-left{position:absolute;left:0;top:50%;transform:translateY(-50%);z-index:2;display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:0 0 0 5px;max-height:70vh;overflow-y:auto;max-width:200px}
 /* RIGHT players */
-.zone-right{position:absolute;right:0;top:50%;transform:translateY(-50%);z-index:2;display:flex;flex-direction:column;align-items:flex-end;gap:4px;padding:0 4px 0 0;max-height:55vh}
+.zone-right{position:absolute;right:0;top:50%;transform:translateY(-50%);z-index:2;display:flex;flex-direction:column;align-items:flex-end;gap:6px;padding:0 5px 0 0;max-height:70vh;overflow-y:auto;max-width:200px}
 
-/* Money box = red pill */
+
 .money-box{background:#c0392b;border:2px solid #e74c3c;border-radius:8px;padding:5px 10px;text-align:center;min-width:60px;flex-shrink:0}
 .money-box .pname{font-size:9px;font-weight:700;color:rgba(255,255,255,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80px}
 .money-box .pamt{font-size:14px;font-weight:900;color:#fff}
@@ -63,12 +61,9 @@ input{font-family:inherit}
 @keyframes glowTurn{from{box-shadow:0 0 6px rgba(255,215,0,.4)}to{box-shadow:0 0 16px rgba(255,215,0,.9)}}
 
 /* Properties panel = dark blue */
-.props-panel{background:#2c3e8c;border:2px solid #3d52c4;border-radius:8px;padding:5px 6px;flex-shrink:0}
-.props-panel .pp-title{font-size:8px;color:rgba(255,255,255,.6);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px}
-.prop-chips-row{display:flex;flex-wrap:wrap;gap:3px}
-.prop-chip{font-size:8px;font-weight:700;padding:2px 5px;border-radius:4px;white-space:nowrap;line-height:1.4}
-.prop-chip.complete{box-shadow:0 0 0 1.5px #FFD700}
-.sets-count{font-size:9px;color:#FFD700;font-weight:700;margin-top:2px}
+.props-panel{background:#2c3e8c;border:2px solid #3d52c4;border-radius:8px;padding:6px 8px;flex-shrink:0;max-width:100%}
+.props-panel .pp-title{font-size:8px;color:rgba(255,255,255,.6);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
+
 
 /* Rotated zones for left/right */
 .zone-left .player-side,.zone-right .player-side{display:flex;flex-direction:row;align-items:center;gap:4px}
@@ -557,49 +552,108 @@ function renderGame(){
 
 function layoutOpponents(){
   const others=G.players.map((p,i)=>({...p,_idx:i})).filter(p=>p._idx!==myPlayerIdx);
-  // Distribute: top, left, right based on count
   const top=document.getElementById("zoneTop");
   const left=document.getElementById("zoneLeft");
   const right=document.getElementById("zoneRight");
-  top.innerHTML="";left.innerHTML="";right.innerHTML="";
-  if(others.length===1){top.innerHTML=oppHTML(others[0]);}
-  else if(others.length===2){left.innerHTML=oppHTML(others[0]);right.innerHTML=oppHTML(others[1]);}
-  else if(others.length===3){top.innerHTML=oppHTML(others[0]);left.innerHTML=oppHTML(others[1]);right.innerHTML=oppHTML(others[2]);}
+  [top,left,right].forEach(z=>{z.innerHTML="";});
+
+  function appendTo(zone,player){zone.appendChild(oppElement(player));}
+
+  if(others.length===1){appendTo(top,others[0]);}
+  else if(others.length===2){appendTo(left,others[0]);appendTo(right,others[1]);}
+  else if(others.length===3){appendTo(top,others[0]);appendTo(left,others[1]);appendTo(right,others[2]);}
   else if(others.length>=4){
-    top.innerHTML=oppHTML(others[0]);
-    left.innerHTML=others.slice(1,Math.ceil(others.length/2)).map(p=>oppHTML(p)).join("");
-    right.innerHTML=others.slice(Math.ceil(others.length/2)).map(p=>oppHTML(p)).join("");
+    appendTo(top,others[0]);
+    others.slice(1,Math.ceil(others.length/2)).forEach(p=>appendTo(left,p));
+    others.slice(Math.ceil(others.length/2)).forEach(p=>appendTo(right,p));
   }
-  // My zone bottom
+
+  // My zone bottom — just money box
   const bot=document.getElementById("zoneBottom");
+  bot.innerHTML="";
   const me=G.players[myPlayerIdx];
-  bot.innerHTML=`<div class="money-box${G.currentPlayer===myPlayerIdx?" is-turn":""}">
-    <div class="pname" style="color:${PLAYER_COLORS[myPlayerIdx%PLAYER_COLORS.length]}">${me.name}</div>
+  const mb=document.createElement("div");
+  mb.className="money-box"+(G.currentPlayer===myPlayerIdx?" is-turn":"");
+  mb.innerHTML=`<div class="pname" style="color:${PLAYER_COLORS[myPlayerIdx%PLAYER_COLORS.length]}">${me.name}</div>
     <div class="pamt">$${bankTotal(me)}M</div>
-    <div class="pcards">🤚 ${me.hand.length} cards</div>
-  </div>`;
+    <div class="pcards">🤚 ${me.hand.length} cards</div>`;
+  bot.appendChild(mb);
 }
 
-function oppHTML(p){
+function oppElement(p){
   const isT=G.currentPlayer===p._idx;
   const col=PLAYER_COLORS[p._idx%PLAYER_COLORS.length];
-  // Property chips
-  const chips=Object.entries(p.properties).filter(([c,a])=>a.length>0).map(([c,a])=>{
-    const pc=PROP_COLORS[c];const complete=a.length>=pc.needed;
-    return `<span class="prop-chip${complete?" complete":""}" style="background:${pc.color};color:${pc.text}">${pc.label} ${a.length}/${pc.needed}</span>`;
-  }).join("");
-  return `<div style="display:flex;flex-direction:column;gap:4px;align-items:center">
-    <div class="money-box${isT?" is-turn":""}">
-      <div class="pname" style="color:${col}">${p.name}</div>
-      <div class="pamt">$${bankTotal(p)+propTotal(p)}M</div>
-      <div class="pcards">Bank $${bankTotal(p)}M &nbsp;|&nbsp; 🤚${p.hand.length}</div>
-      ${isT?'<div style="font-size:8px;color:#FFD700;font-weight:700;margin-top:2px">▶ Their turn</div>':""}
-    </div>
-    <div class="props-panel">
-      <div class="pp-title">Properties (${completeSetsCount(p)}/3 sets)</div>
-      <div class="prop-chips-row">${chips||'<span style="font-size:8px;color:rgba(255,255,255,.4)">none yet</span>'}</div>
-    </div>
-  </div>`;
+  const wrapper=document.createElement("div");
+  wrapper.style.cssText="display:flex;flex-direction:column;gap:5px;align-items:center;max-width:100%";
+
+  // Money box (red)
+  const mb=document.createElement("div");
+  mb.className="money-box"+(isT?" is-turn":"");
+  mb.innerHTML=`<div class="pname" style="color:${col}">${p.name}</div>
+    <div class="pamt">$${bankTotal(p)+propTotal(p)}M</div>
+    <div class="pcards">Bank $${bankTotal(p)}M &nbsp;|&nbsp; 🤚${p.hand.length}</div>
+    ${isT?'<div style="font-size:8px;color:#FFD700;font-weight:700;margin-top:1px">▶ THEIR TURN</div>':""}`;
+  wrapper.appendChild(mb);
+
+  // Properties panel (dark blue) — full mini cards
+  const panel=document.createElement("div");
+  panel.className="props-panel";
+
+  const ptitle=document.createElement("div");
+  ptitle.className="pp-title";
+  ptitle.textContent="Properties ("+completeSetsCount(p)+"/3 sets)";
+  panel.appendChild(ptitle);
+
+  const colorGroups=Object.keys(PROP_COLORS).filter(c=>(p.properties[c]||[]).length>0);
+
+  if(!colorGroups.length){
+    const empty=document.createElement("div");
+    empty.style.cssText="font-size:8px;color:rgba(255,255,255,.35);padding:2px 0";
+    empty.textContent="No properties yet";
+    panel.appendChild(empty);
+  } else {
+    colorGroups.forEach(color=>{
+      const cards=p.properties[color]||[];
+      const needed=PROP_COLORS[color].needed;
+      const complete=cards.length>=needed;
+      const impr=p.improvements[color]||{};
+
+      const group=document.createElement("div");
+      group.style.cssText="margin-bottom:5px";
+
+      // Color label
+      const glabel=document.createElement("div");
+      glabel.style.cssText=`font-size:8px;font-weight:700;color:${PROP_COLORS[color].color};margin-bottom:2px;display:flex;align-items:center;gap:4px`;
+      glabel.textContent=PROP_COLORS[color].label+" "+cards.length+"/"+needed;
+      if(complete) glabel.textContent+=" ✓";
+      if(complete&&impr.hotel) glabel.textContent+=" 🏨";
+      else if(complete&&impr.house) glabel.textContent+=" 🏠";
+      group.appendChild(glabel);
+
+      // Cards row — use xxs size cards
+      const crow=document.createElement("div");
+      crow.style.cssText="display:flex;gap:3px;flex-wrap:wrap";
+      cards.forEach(card=>{
+        const wrap=document.createElement("div");
+        wrap.innerHTML=cardHTML(card,"xxs");
+        // Make the card non-interactive (just display)
+        const inner=wrap.firstElementChild;
+        if(inner){inner.style.cursor="default";inner.style.pointerEvents="none";}
+        crow.appendChild(wrap);
+      });
+      group.appendChild(crow);
+
+      // Complete set highlight border
+      if(complete){
+        group.style.cssText+="padding:3px 5px;border-radius:5px;background:rgba(255,215,0,.08);border:1px solid rgba(255,215,0,.3)";
+      }
+
+      panel.appendChild(group);
+    });
+  }
+
+  wrapper.appendChild(panel);
+  return wrapper;
 }
 
 function renderPlayArea(me,myTurn){
