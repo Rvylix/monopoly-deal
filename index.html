@@ -84,7 +84,7 @@ input{font-family:inherit}
 .my-prop-group{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:7px;padding:4px 6px}
 .my-prop-group.complete{border-color:rgba(255,215,0,.4);background:rgba(255,215,0,.06)}
 .my-prop-group-label{font-size:8px;font-weight:700;margin-bottom:3px}
-.my-prop-group-cards{display:flex;gap:3px}
+.my-prop-group-cards{position:relative;display:inline-block}
 .my-prop-impr{font-size:8px;color:#FFD700;margin-top:2px}
 
 /* Bank row */
@@ -426,6 +426,7 @@ function payPlayer(debtor,creditor,owed){
 // ── STATE ─────────────────────────────────────────────────────────────────
 let myName="",roomCode="",myPlayerIdx=-1,isHost=false,roomPlayers=[];
 let G=null,selectedCards=[],modalStep={};
+let _pendingJSNAction=null; // stored callback waiting for JSN response
 
 // ── SOUND ─────────────────────────────────────────────────────────────────
 function beep(f=520,d=180,v=0.3){try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=f;g.gain.value=v;o.start();o.stop(ctx.currentTime+d/1000);}catch(e){}}
@@ -473,6 +474,28 @@ async function subscribeRoom(){
     G=msg.data.game;renderGame();
     if(G.winner){showWinnerScreen(G.winner);return;}
     if(isMyTurn()){showTurnAlert();if(G.phase==="draw")setTimeout(autoDraw,600);}
+  });
+  // JSN: attacker sends prompt → target sees popup
+  channel.subscribe("jsn_prompt",(msg)=>{
+    if(msg.data.targetIdx!==myPlayerIdx)return; // only for the target
+    showJSNPrompt(msg.data.actionLabel,msg.data.attackerIdx);
+  });
+  // JSN: target responds → attacker receives and proceeds or cancels
+  channel.subscribe("jsn_response",(msg)=>{
+    if(msg.data.attackerIdx!==myPlayerIdx)return; // only for the attacker
+    if(msg.data.used){
+      // Target used JSN — cancel the pending action, update game state
+      G=deepClone(G);
+      const t=G.players[msg.data.targetIdx];
+      const idx=t.hand.findIndex(c=>c.name==="Just Say No");
+      if(idx>=0){const[jsn]=t.hand.splice(idx,1);G.discard.push(jsn);}
+      addLog(G,`${t.name} used Just Say No! Action cancelled.`,msg.data.targetIdx);
+      _pendingJSNAction=null;
+      broadcastGame();closeModal();
+    } else {
+      // Target allowed it — execute the pending action
+      if(_pendingJSNAction){_pendingJSNAction();_pendingJSNAction=null;}
+    }
   });
   if(isHost){await new Promise(r=>setTimeout(r,300));await broadcastRoomState();}
 }
@@ -630,15 +653,25 @@ function oppElement(p){
       else if(complete&&impr.house) glabel.textContent+=" 🏠";
       group.appendChild(glabel);
 
-      // Cards row — use xxs size cards
+      // Cards stack — same-color cards stacked on top of each other
       const crow=document.createElement("div");
-      crow.style.cssText="display:flex;gap:3px;flex-wrap:wrap";
-      cards.forEach(card=>{
+      crow.style.cssText="position:relative;display:inline-block";
+      const cardW=32,cardH=46,offset=10;
+      crow.style.width=(cardW+(cards.length-1)*offset)+"px";
+      crow.style.height=cardH+"px";
+      cards.forEach((card,ci)=>{
         const wrap=document.createElement("div");
         wrap.innerHTML=cardHTML(card,"xxs");
-        // Make the card non-interactive (just display)
         const inner=wrap.firstElementChild;
-        if(inner){inner.style.cursor="default";inner.style.pointerEvents="none";}
+        if(inner){
+          inner.style.cursor="default";
+          inner.style.pointerEvents="none";
+          inner.style.position="absolute";
+          inner.style.left=(ci*offset)+"px";
+          inner.style.top="0";
+          inner.style.zIndex=ci;
+          inner.style.boxShadow="-2px 2px 4px rgba(0,0,0,.4)";
+        }
         crow.appendChild(wrap);
       });
       group.appendChild(crow);
@@ -679,10 +712,34 @@ function renderPlayArea(me,myTurn){
     const needed=PROP_COLORS[color].needed;const complete=cards.length>=needed;const impr=me.improvements[color]||{};
     const g=document.createElement("div");g.className="my-prop-group"+(complete?" complete":"");
     const gl=document.createElement("div");gl.className="my-prop-group-label";gl.style.color=PROP_COLORS[color].color;
-    gl.textContent=PROP_COLORS[color].label+" "+(complete?"✓":cards.length+"/"+needed);g.appendChild(gl);
-    const gc=document.createElement("div");gc.className="my-prop-group-cards";
-    cards.forEach(c=>{gc.innerHTML+=cardHTML(c,"xs");});g.appendChild(gc);
-    if(complete&&(impr.house||impr.hotel)){const im=document.createElement("div");im.className="my-prop-impr";im.textContent=impr.hotel?"🏨 Hotel":"🏠 House";g.appendChild(im);}
+    gl.textContent=PROP_COLORS[color].label+" "+(complete?"✓":cards.length+"/"+needed);
+    if(complete&&impr.hotel) gl.textContent+=" 🏨";
+    else if(complete&&impr.house) gl.textContent+=" 🏠";
+    g.appendChild(gl);
+
+    // Stacked card pile for my props (xs size, offset 14px each)
+    const cardW=44,cardH=63,offset=14;
+    const gc=document.createElement("div");
+    gc.className="my-prop-group-cards";
+    gc.style.cssText="position:relative;display:inline-block;margin-bottom:2px";
+    gc.style.width=(cardW+(cards.length-1)*offset)+"px";
+    gc.style.height=cardH+"px";
+    cards.forEach((c,ci)=>{
+      const wrap=document.createElement("div");
+      wrap.innerHTML=cardHTML(c,"xs");
+      const inner=wrap.firstElementChild;
+      if(inner){
+        inner.style.position="absolute";
+        inner.style.left=(ci*offset)+"px";
+        inner.style.top="0";
+        inner.style.zIndex=ci;
+        inner.style.cursor="default";
+        inner.style.pointerEvents="none";
+        inner.style.boxShadow="-2px 3px 6px rgba(0,0,0,.5)";
+      }
+      gc.appendChild(wrap);
+    });
+    g.appendChild(gc);
     pgroups.appendChild(g);
   });
   propSec.appendChild(pgroups);body.appendChild(propSec);
@@ -854,23 +911,45 @@ function advanceTurn(){
 }
 
 // ── JUST SAY NO ───────────────────────────────────────────────────────────
+// Called by attacker: broadcasts jsn_prompt to target, stores onConfirm as pending
 function checkJSN(targetPlayerIdx,actionLabel,onConfirm){
   const target=G.players[targetPlayerIdx];
-  if(!target.hand.some(c=>c.name==="Just Say No")){onConfirm();return;}
+  if(!target.hand.some(c=>c.name==="Just Say No")){
+    // Target has no JSN — proceed immediately
+    onConfirm();return;
+  }
+  // Store the action to run if target allows it
+  _pendingJSNAction=onConfirm;
+  // Show attacker a waiting overlay
   const jsnC=document.getElementById("jsnContainer");jsnC.innerHTML="";
   const overlay=document.createElement("div");overlay.className="jsn-overlay";
   const box=document.createElement("div");box.className="jsn-box";
-  box.innerHTML=`<h2>🚫 Just Say No!</h2><p><strong>${target.name}</strong> has a Just Say No!<br>Use it to cancel:<br><em>${actionLabel}</em>?</p>`;
-  const useBtn=document.createElement("button");useBtn.className="modal-btn danger";useBtn.textContent="Yes — Use Just Say No!";
+  box.innerHTML=`<h2>⏳ Waiting...</h2><p>Asking <strong>${target.name}</strong> if they want to use<br><strong>Just Say No</strong> against:<br><em>${actionLabel}</em></p>`;
+  const cancelBtn=document.createElement("button");cancelBtn.className="modal-btn ghost";cancelBtn.textContent="Cancel Action";
+  cancelBtn.onclick=()=>{_pendingJSNAction=null;jsnC.innerHTML="";closeModal();};
+  box.appendChild(cancelBtn);overlay.appendChild(box);jsnC.appendChild(overlay);
+  // Broadcast the prompt to the target player
+  channel.publish("jsn_prompt",{targetIdx:targetPlayerIdx,attackerIdx:myPlayerIdx,actionLabel});
+}
+
+// Called on the TARGET's screen when they receive jsn_prompt
+function showJSNPrompt(actionLabel,attackerIdx){
+  beep(440,200,0.4);setTimeout(()=>beep(550,200,0.4),220); // alert sound
+  const attacker=G.players[attackerIdx];
+  const jsnC=document.getElementById("jsnContainer");jsnC.innerHTML="";
+  const overlay=document.createElement("div");overlay.className="jsn-overlay";
+  const box=document.createElement("div");box.className="jsn-box";
+  box.innerHTML=`<h2>🚫 Just Say No?</h2><p><strong>${attacker.name}</strong> is trying:<br><em>${actionLabel}</em><br><br>Do you want to block it?</p>`;
+  const useBtn=document.createElement("button");useBtn.className="modal-btn danger";useBtn.style.cssText="width:100%;margin-bottom:8px;padding:12px";useBtn.textContent="🚫 Yes — Just Say No!";
   useBtn.onclick=()=>{
-    G=deepClone(G);const t=G.players[targetPlayerIdx];
-    const idx=t.hand.findIndex(c=>c.name==="Just Say No");
-    if(idx>=0){const[jsn]=t.hand.splice(idx,1);G.discard.push(jsn);}
-    addLog(G,`${t.name} used Just Say No! Action cancelled.`,targetPlayerIdx);
-    jsnC.innerHTML="";broadcastGame();closeModal();
+    jsnC.innerHTML="";
+    channel.publish("jsn_response",{attackerIdx,targetIdx:myPlayerIdx,used:true});
   };
-  const noBtn=document.createElement("button");noBtn.className="modal-btn ghost";noBtn.textContent="No — Allow it";
-  noBtn.onclick=()=>{jsnC.innerHTML="";onConfirm();};
+  const noBtn=document.createElement("button");noBtn.className="modal-btn ghost";noBtn.style.cssText="width:100%";noBtn.textContent="Allow it";
+  noBtn.onclick=()=>{
+    jsnC.innerHTML="";
+    channel.publish("jsn_response",{attackerIdx,targetIdx:myPlayerIdx,used:false});
+  };
   box.appendChild(useBtn);box.appendChild(noBtn);overlay.appendChild(box);jsnC.appendChild(overlay);
 }
 
