@@ -389,8 +389,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // SUPABASE CONFIG  ←  Replace with YOUR values if needed
 // ─────────────────────────────────────────────────────────────────────────────
-const SUPABASE_URL = "https://wycqxkfumzvkrrzuupgg.supabase.co;
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5Y3F4a2Z1bXp2a3JyenV1cGdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwMjc4NDMsImV4cCI6MjA5NTYwMzg0M30.bEqdAAFHXlAVUuJQnenaSmEa41WFnBsU3Mz38oOuG00";
+const SUPABASE_URL = "https://wycqxkfumzvkrrzuupgg.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5Y3F4a2Z1bXp2a3JyenV1cGdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgxNjI0NTksImV4cCI6MjA2MzczODQ1OX0.GrCKZMbGmHQ3Nxi_jQmGq5qOECJElKGMQjLlb2fOXLs";
 const sbClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -971,98 +971,96 @@ function renderModal(){
   const m=currentModal;
   const me=G.players[myPlayerIdx];
   const others=G.players.filter((_,i)=>i!==myPlayerIdx);
-  let html="";
+  const mc=document.getElementById("modalContainer");
+  mc.innerHTML="";
 
-  const overlay=`<div class="modal-overlay" onclick="void(0)">`;
-  const box=`<div class="modal-box" onclick="event.stopPropagation()">`;
-  const accBtn=(lbl,fn)=>`<button class="modal-btn accent" onclick="${fn}">${lbl}</button>`;
-  const ghostBtn=(lbl,fn)=>`<button class="modal-btn ghost" onclick="${fn}">${lbl}</button>`;
-  const colorBtn=(lbl,color,fn)=>`<button class="color-btn" style="background:${PROP_COLORS[color]?.color||'#333'};color:${PROP_COLORS[color]?.text||'#fff'}" onclick="${fn}">${lbl}</button>`;
+  const overlay=document.createElement("div");
+  overlay.className="modal-overlay";
+  const box=document.createElement("div");
+  box.className="modal-box";
+  box.onclick=e=>e.stopPropagation();
+  overlay.appendChild(box);
+  mc.appendChild(overlay);
+
+  function addTitle(t){ const d=document.createElement("div"); d.className="modal-title"; d.textContent=t; box.appendChild(d); }
+  function addSub(t){ const d=document.createElement("div"); d.className="modal-sub"; d.textContent=t; box.appendChild(d); }
+  function addBtn(lbl,cls,fn){ const b=document.createElement("button"); b.className="modal-btn "+cls; b.textContent=lbl; b.onclick=fn; box.appendChild(b); return b; }
+  function addColorBtn(lbl,bg,fg,fn){
+    const b=document.createElement("button"); b.className="color-btn";
+    b.style.background=bg; b.style.color=fg; b.textContent=lbl; b.onclick=fn; box.appendChild(b); return b;
+  }
 
   if(m.type==="pickWildColor"){
-    html=`${overlay}${box}
-      <div class="modal-title">🌈 Pick Color for Wild Card</div>
-      <div>${m.colors.map(c=>colorBtn(PROP_COLORS[c]?.label||c,c,`resolveModal("wildColor","${c}")`)).join("")}</div>
-      ${ghostBtn("Cancel","closeModal()")}
-    </div></div>`;
+    addTitle("Pick Color for Wild Card");
+    m.colors.forEach(c=>{
+      const col=PROP_COLORS[c];
+      addColorBtn(col?col.label:c, col?col.color:"#333", col?col.text:"#fff", ()=>resolveModal("wildColor",c));
+    });
+    addBtn("Cancel","ghost",closeModal);
   }
   else if(m.type==="birthday"){
-    html=`${overlay}${box}
-      <div class="modal-title">🎂 It's My Birthday!</div>
-      <div class="modal-sub">Collect $2M from every other player. Payment is taken from their bank automatically.</div>
-      ${accBtn("Collect $2M from everyone!","resolveModal('birthday')")}
-      ${ghostBtn("Cancel","closeModal()")}
-    </div></div>`;
+    addTitle("It is My Birthday!");
+    addSub("Collect $2M from every other player. Taken from their bank automatically.");
+    addBtn("Collect $2M from everyone!","accent",()=>resolveModal("birthday"));
+    addBtn("Cancel","ghost",closeModal);
   }
   else if(m.type==="debtCollector"){
-    html=`${overlay}${box}
-      <div class="modal-title">💸 Debt Collector</div>
-      <div class="modal-sub">Pick a player to collect $5M from:</div>
-      ${others.map(p=>`${accBtn(`${p.name} ($${bankTotal(p)}M in bank)`,`resolveModal('debtCollector',${p.id})`)}`).join("")}
-      ${ghostBtn("Cancel","closeModal()")}
-    </div></div>`;
+    addTitle("Debt Collector");
+    addSub("Pick a player to collect $5M from:");
+    others.forEach(p=>{ addBtn(p.name+" ($"+bankTotal(p)+"M in bank)","accent",()=>resolveModal("debtCollector",p.id)); });
+    addBtn("Cancel","ghost",closeModal);
   }
   else if(m.type==="rent"){
     const availColors=(m.rentColors||[]).filter(c=>(me.properties[c]||[]).length>0);
     if(!modalStep.color){
-      html=`${overlay}${box}
-        <div class="modal-title">🏠 Charge Rent</div>
-        <div class="modal-sub">Pick the color to charge rent on:</div>
-        ${availColors.length===0?'<div style="color:#f66;font-size:12px">You have no matching properties!</div>':""}
-        ${availColors.map(c=>{
-          const rent=getRent(me,c);
-          return `<button class="color-btn" style="background:${PROP_COLORS[c].color};color:${PROP_COLORS[c].text}" onclick="modalStep.color='${c}';renderModal()">
-            ${PROP_COLORS[c].label} — Rent: $${rent}M (${(me.properties[c]||[]).length}/${PROP_COLORS[c].needed})
-          </button>`;
-        }).join("")}
-        ${ghostBtn("Cancel","closeModal()")}
-      </div></div>`;
+      addTitle("Charge Rent");
+      addSub("Pick the color to charge rent on:");
+      if(availColors.length===0){ const d=document.createElement("div"); d.style.cssText="color:#f66;font-size:12px"; d.textContent="You have no matching properties!"; box.appendChild(d); }
+      availColors.forEach(c=>{
+        const col=PROP_COLORS[c];
+        const rent=getRent(me,c);
+        const lbl=col.label+" - Rent: $"+rent+"M ("+((me.properties[c]||[]).length)+"/"+col.needed+")";
+        addColorBtn(lbl, col.color, col.text, ()=>{ modalStep.color=c; renderModal(); });
+      });
+      addBtn("Cancel","ghost",closeModal);
     } else {
       const color=modalStep.color;
       const rent=getRent(me,color);
       const isAll=(m.rentColors||[]).length>4;
       if(isAll){
-        html=`${overlay}${box}
-          <div class="modal-title">Charge All Players?</div>
-          <div class="modal-sub">Charge $${rent}M rent on ${PROP_COLORS[color].label} from all players?</div>
-          ${accBtn("Yes, charge everyone!","resolveModal('rentAll')")}
-          ${ghostBtn("Cancel","closeModal()")}
-        </div></div>`;
+        addTitle("Charge All Players?");
+        addSub("Charge $"+rent+"M rent on "+PROP_COLORS[color].label+" from all players?");
+        addBtn("Yes, charge everyone!","accent",()=>resolveModal("rentAll"));
+        addBtn("Cancel","ghost",closeModal);
       } else {
-        html=`${overlay}${box}
-          <div class="modal-title">Pick Player to Charge</div>
-          <div class="modal-sub">Charge $${rent}M for ${PROP_COLORS[color].label}:</div>
-          ${others.map(p=>`${accBtn(`${p.name}`,`resolveModal('rentOne',${p.id})`)}`).join("")}
-          ${ghostBtn("Cancel","closeModal()")}
-        </div></div>`;
+        addTitle("Pick Player to Charge");
+        addSub("Charge $"+rent+"M for "+PROP_COLORS[color].label+":");
+        others.forEach(p=>{ addBtn(p.name,"accent",()=>resolveModal("rentOne",p.id)); });
+        addBtn("Cancel","ghost",closeModal);
       }
     }
   }
   else if(m.type==="slyDeal"){
     if(modalStep.targetId===undefined){
-      html=`${overlay}${box}
-        <div class="modal-title">🦊 Sly Deal — Pick Target</div>
-        ${others.map(p=>`${accBtn(p.name,`modalStep.targetId=${p.id};renderModal()`)}`).join("")}
-        ${ghostBtn("Cancel","closeModal()")}
-      </div></div>`;
+      addTitle("Sly Deal - Pick Target");
+      others.forEach(p=>{ addBtn(p.name,"accent",()=>{ modalStep.targetId=p.id; renderModal(); }); });
+      addBtn("Cancel","ghost",closeModal);
     } else {
       const target=G.players[modalStep.targetId];
-      const stealable=Object.entries(target.properties)
-        .filter(([c,a])=>a.length>0&&a.length<PROP_COLORS[c].needed);
+      const stealable=Object.entries(target.properties).filter(([c,a])=>a.length>0&&a.length<PROP_COLORS[c].needed);
       if(!modalStep.color){
-        html=`${overlay}${box}
-          <div class="modal-title">Sly Deal — Pick Color</div>
-          ${stealable.length===0?'<div style="color:#f66;font-size:12px">No incomplete sets to steal!</div>':""}
-          ${stealable.map(([c,a])=>colorBtn(`${PROP_COLORS[c].label} (${a.length} cards)`,c,`modalStep.color='${c}';renderModal()`)).join("")}
-          ${ghostBtn("Cancel","closeModal()")}
-        </div></div>`;
+        addTitle("Sly Deal - Pick Color");
+        if(stealable.length===0){ const d=document.createElement("div"); d.style.cssText="color:#f66;font-size:12px"; d.textContent="No incomplete sets to steal!"; box.appendChild(d); }
+        stealable.forEach(([c,a])=>{
+          const col=PROP_COLORS[c];
+          addColorBtn(col.label+" ("+a.length+" cards)", col.color, col.text, ()=>{ modalStep.color=c; renderModal(); });
+        });
+        addBtn("Cancel","ghost",closeModal);
       } else {
         const props=target.properties[modalStep.color]||[];
-        html=`${overlay}${box}
-          <div class="modal-title">Sly Deal — Pick Card</div>
-          ${props.map((c,i)=>`<button class="color-btn" style="background:rgba(255,255,255,0.08);color:#fff" onclick="resolveModal('slyDeal',${i})">${c.name}</button>`).join("")}
-          ${ghostBtn("Cancel","closeModal()")}
-        </div></div>`;
+        addTitle("Sly Deal - Pick Card");
+        props.forEach((c,i)=>{ addBtn(c.name,"ghost",()=>resolveModal("slyDeal",i)); });
+        addBtn("Cancel","ghost",closeModal);
       }
     }
   }
@@ -1074,14 +1072,13 @@ function renderModal(){
         if(a.length>=PROP_COLORS[c].needed) completeSets.push({player:p,playerIdx:pi,color:c});
       });
     });
-    html=`${overlay}${box}
-      <div class="modal-title">💥 Deal Breaker — Steal a Full Set</div>
-      ${completeSets.length===0?'<div style="color:#f66;font-size:12px">No complete sets to steal!</div>':""}
-      ${completeSets.map(({player,playerIdx,color})=>
-        `<button class="color-btn" style="background:${PROP_COLORS[color].color};color:${PROP_COLORS[color].text}" onclick="resolveModal('dealBreaker',${playerIdx},'${color}')">${player.name}'s ${PROP_COLORS[color].label}</button>`
-      ).join("")}
-      ${ghostBtn("Cancel","closeModal()")}
-    </div></div>`;
+    addTitle("Deal Breaker - Steal a Full Set");
+    if(completeSets.length===0){ const d=document.createElement("div"); d.style.cssText="color:#f66;font-size:12px"; d.textContent="No complete sets to steal!"; box.appendChild(d); }
+    completeSets.forEach(({player,playerIdx,color})=>{
+      const col=PROP_COLORS[color];
+      addColorBtn(player.name+"s "+col.label, col.color, col.text, ()=>resolveModal("dealBreaker",playerIdx,color));
+    });
+    addBtn("Cancel","ghost",closeModal);
   }
   else if(m.type==="improvement"){
     const validColors=Object.entries(me.properties)
@@ -1092,31 +1089,34 @@ function renderModal(){
         if(m.improvType==="hotel") return impr.house&&!impr.hotel;
         return false;
       });
-    html=`${overlay}${box}
-      <div class="modal-title">${m.improvType==="house"?"🏠 Add House":"🏨 Add Hotel"}</div>
-      ${validColors.length===0?`<div style="color:#f66;font-size:12px">No valid sets!${m.improvType==="hotel"?" (Need a house first)":""}</div>`:""}
-      ${validColors.map(([c])=>colorBtn(PROP_COLORS[c].label,c,`resolveModal('improvement','${c}')`)).join("")}
-      ${ghostBtn("Cancel","closeModal()")}
-    </div></div>`;
+    addTitle(m.improvType==="house"?"Add House":"Add Hotel");
+    if(validColors.length===0){ const d=document.createElement("div"); d.style.cssText="color:#f66;font-size:12px"; d.textContent="No valid sets!"+(m.improvType==="hotel"?" (Need a house first)":""); box.appendChild(d); }
+    validColors.forEach(([c])=>{
+      const col=PROP_COLORS[c];
+      addColorBtn(col.label, col.color, col.text, ()=>resolveModal("improvement",c));
+    });
+    addBtn("Cancel","ghost",closeModal);
   }
   else if(m.type==="discard"){
     if(!modalStep.discardSel) modalStep.discardSel=[];
     const needed=m.excess;
+    addTitle("Discard "+needed+" Card"+(needed>1?"s":""));
+    addSub("Select "+needed+" card"+(needed>1?"s":"")+" to discard (you have "+me.hand.length+", max is 7).");
+    const grid=document.createElement("div"); grid.className="discard-grid"; box.appendChild(grid);
+    me.hand.forEach((c,i)=>{
+      const wrap=document.createElement("div");
+      wrap.innerHTML=cardHTML(c,"sm",modalStep.discardSel.includes(i));
+      wrap.onclick=()=>toggleDiscard(i,needed);
+      grid.appendChild(wrap);
+    });
+    const confirmBtn=document.createElement("button");
     const sel=modalStep.discardSel;
-    html=`${overlay}${box}
-      <div class="modal-title">Discard ${needed} Card${needed>1?"s":""}</div>
-      <div class="modal-sub">Select ${needed} card${needed>1?"s":""} to discard (you have ${me.hand.length}, max is 7).</div>
-      <div class="discard-grid">
-        ${me.hand.map((c,i)=>`<div onclick="toggleDiscard(${i},${needed})">${cardHTML(c,"sm",sel.includes(i))}</div>`).join("")}
-      </div>
-      <button class="modal-btn${sel.length===needed?" accent":" ghost"}"
-        onclick="sel.length===${needed}?resolveModal('discard'):void(0)"
-        style="opacity:${sel.length===needed?1:0.5}"
-      >Discard Selected (${sel.length}/${needed})</button>
-    </div></div>`;
+    confirmBtn.className="modal-btn "+(sel.length===needed?"accent":"ghost");
+    confirmBtn.style.opacity=sel.length===needed?"1":"0.5";
+    confirmBtn.textContent="Discard Selected ("+sel.length+"/"+needed+")";
+    confirmBtn.onclick=()=>{ if(sel.length===needed) resolveModal("discard"); };
+    box.appendChild(confirmBtn);
   }
-
-  document.getElementById("modalContainer").innerHTML=html;
 }
 
 function toggleDiscard(idx,needed){
