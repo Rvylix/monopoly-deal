@@ -4,328 +4,256 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Monopoly Deal — Online</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400..900;1,400..900&family=Archivo+Narrow:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet"/>
+<script>
+tailwind.config={darkMode:"class",theme:{extend:{
+  colors:{
+    "primary":"#6a5f00","primary-container":"#ffe600","on-primary-container":"#726600",
+    "secondary":"#a90097","secondary-container":"#d300bd","on-secondary":"#ffffff",
+    "tertiary":"#006c50","tertiary-container":"#59ffc9","on-tertiary-container":"#007456",
+    "surface":"#f9f9f9","surface-container-low":"#f3f3f4","surface-container":"#eeeeee",
+    "surface-container-high":"#e8e8e8","surface-container-highest":"#e2e2e2",
+    "surface-variant":"#e2e2e2","on-surface":"#1a1c1c","on-surface-variant":"#4b4731",
+    "outline":"#7c775f","outline-variant":"#cdc7aa",
+    "prop-brown":"#795548","prop-lightblue":"#29B6F6","prop-pink":"#FF1493",
+    "prop-orange":"#FFA500","prop-red":"#F44336","prop-yellow":"#FFEB3B",
+    "prop-green":"#388E3C","prop-darkblue":"#1565C0","prop-railroad":"#424242","prop-utility":"#78909C",
+  },
+  fontFamily:{"montserrat":["Montserrat"],"archivo":["Archivo Narrow"]},
+}}}
+</script>
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;overflow:hidden}
-body{font-family:'Trebuchet MS',sans-serif;font-size:13px;color:#111;background:#1a5c1a}
-button{font-family:inherit;cursor:pointer;transition:all .15s}
-button:active{transform:scale(.97)}
-input{font-family:inherit}
-::-webkit-scrollbar{width:5px;height:5px}
-::-webkit-scrollbar-thumb{background:rgba(0,0,0,.25);border-radius:4px}
+body{background-color:#007456;background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.05) 0,rgba(0,0,0,.05) 2px,transparent 2px,transparent 10px);}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:#f1f1f1;border-left:2px solid black}
+::-webkit-scrollbar-thumb{background:#888;border:2px solid black}
+.nb-card{border:4px solid black;box-shadow:6px 6px 0 0 rgba(0,0,0,1);background:white}
+.nb-card-sm{border:2px solid black;box-shadow:2px 2px 0 0 rgba(0,0,0,1);background:white}
+.nb-btn{border:4px solid black;box-shadow:4px 4px 0 0 rgba(0,0,0,1);transition:all .1s;cursor:pointer;font-family:Montserrat,sans-serif;font-weight:700}
+.nb-btn:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0 0 rgba(0,0,0,1)}
+.nb-btn:active{transform:translate(4px,4px);box-shadow:0 0 0 0 rgba(0,0,0,1)}
+.nb-btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:4px 4px 0 0 rgba(0,0,0,1)}
 
-/* ── LOBBY ── */
-#lobby{display:flex;align-items:center;justify-content:center;height:100vh;background:linear-gradient(160deg,#080810,#0d1a2a)}
-.lbox{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:36px 32px;max-width:420px;width:100%;text-align:center;color:#fff}
-.lbox h1{font-size:36px;font-weight:900;letter-spacing:3px;color:#FFD700}
-.lbox h2{font-size:14px;color:#777;letter-spacing:5px;margin:4px 0 28px}
-.lbl{font-size:11px;color:#777;margin-bottom:5px;text-align:left}
-.inp{width:100%;padding:10px 14px;border-radius:8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#fff;font-size:14px;outline:none;margin-bottom:10px}
-.inp:focus{border-color:rgba(255,215,0,.5)}
-.btn-gold{width:100%;padding:13px;background:linear-gradient(135deg,#FFD700,#FFA500);color:#000;font-weight:800;font-size:15px;border:none;border-radius:10px;margin-top:4px}
-.btn-ghost{width:100%;padding:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);color:#ccc;font-size:13px;border-radius:10px;margin-top:8px}
-.divider{height:1px;background:rgba(255,255,255,.1);margin:20px 0}
-.pslot{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 14px;margin-bottom:6px}
-.dot{width:8px;height:8px;border-radius:50%;background:#4CAF50;flex-shrink:0}
-.dot.w{background:#444;animation:blink 1.4s infinite}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
-.room-code{font-size:38px;font-weight:900;letter-spacing:10px;color:#FFD700;background:rgba(255,215,0,.08);border:1px solid rgba(255,215,0,.2);border-radius:12px;padding:14px;margin:10px 0}
-#lobbyStatus{font-size:12px;color:#888;margin-top:10px;min-height:18px}
-#waitingRoom{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:50;align-items:center;justify-content:center}
+/* HAND CARDS */
+.hand-card{min-width:120px;height:180px;margin-right:-40px;position:relative;transition:transform .25s,z-index 0s;z-index:1;cursor:pointer}
+.hand-card:hover{transform:translateY(-28px);z-index:10}
+.hand-card.selected{transform:translateY(-36px);z-index:20;outline:4px solid #e65c00;outline-offset:2px}
+.hand-card:last-child{margin-right:0}
+.hand-container{display:flex;padding:8px 20px 8px;gap:0;overflow-x:auto;align-items:flex-end;height:200px;justify-content:center}
 
-/* ══ GAME LAYOUT ══
-   Top bar (opponents strip) | Right panel (leaderboard + log)
-   Center: table area
-   Bottom: YOUR TABLE panel
-   Below: hand drawer
-*/
-#game{display:none;height:100vh;width:100vw;position:relative;overflow:hidden;background:#1e6b1e}
-/* felt texture */
-#game::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(45deg,rgba(0,0,0,.04) 0,rgba(0,0,0,.04) 1px,transparent 0,transparent 40%);background-size:16px 16px;pointer-events:none;z-index:0}
+/* MINI CARDS (bank / property display) */
+.mini-card{width:60px;height:88px;border:2px solid black;background:white;box-shadow:2px 2px 0 rgba(0,0,0,1);display:flex;flex-direction:column;font-size:10px;flex-shrink:0}
+.mini-card-stack{position:relative;width:60px;height:108px;flex-shrink:0}
+.mini-card-stack .mini-card{position:absolute;left:0;top:0}
+.mini-card-stack .mini-card:nth-child(2){top:14px}
+.mini-card-stack .mini-card:nth-child(3){top:28px}
+.mini-card-stack .mini-card:nth-child(4){top:42px}
 
-/* ── RIGHT PANEL (leaderboard + log) ── */
-#rightPanel{position:absolute;top:0;right:0;width:280px;height:100%;z-index:5;display:flex;flex-direction:column;gap:0;padding:10px 10px 10px 0}
+/* OPP side (rotated label) */
+.opp-side-label{writing-mode:vertical-rl;transform:rotate(180deg)}
 
-#leaderboard{background:#5c4a00;border:2px solid #8c7200;border-radius:12px;padding:12px 14px;flex-shrink:0}
-#leaderboard h3{font-size:14px;font-weight:900;color:#FFD700;margin-bottom:10px;letter-spacing:.5px}
-.lb-row{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-radius:8px;margin-bottom:4px;background:rgba(0,0,0,.2)}
-.lb-row.me{background:rgba(255,215,0,.15);border:1px solid rgba(255,215,0,.3)}
-.lb-rank{font-size:11px;font-weight:700;color:#aaa;width:18px}
-.lb-name{font-size:13px;font-weight:700;flex:1;padding:0 8px}
-.lb-sets{font-size:11px;font-weight:700;color:#FFD700;background:rgba(0,0,0,.3);padding:2px 8px;border-radius:10px}
-
-#logPanel{background:#8b008b;border:2px solid #b000b0;border-radius:12px;margin-top:8px;flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0}
-#logPanel h3{font-size:14px;font-weight:900;color:#fff;padding:10px 14px 8px;border-bottom:1px solid rgba(255,255,255,.15);flex-shrink:0;display:flex;align-items:center;justify-content:space-between}
-#logBody{flex:1;overflow-y:auto;padding:8px}
-.log-row{background:#fff;border-radius:6px;padding:8px 10px;margin-bottom:6px}
-.log-row .log-who{font-size:11px;font-weight:700;margin-bottom:2px}
-.log-row .log-what{font-size:11px;color:#333;line-height:1.4}
-.log-row.system{background:#b2f0e0}
-.log-row.system .log-who{color:#007a5a}
-
-/* ── OPPONENTS STRIP (top area, left of right panel) ── */
-#opponentsArea{position:absolute;top:0;left:0;right:280px;z-index:5;padding:10px 10px 0;display:flex;gap:10px;overflow-x:auto;flex-wrap:nowrap}
-
-.opp-block{background:#fff;border:2px solid #ccc;border-radius:12px;padding:0;min-width:180px;max-width:240px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden}
-.opp-block.is-turn{border-color:#FFD700;box-shadow:0 0 0 3px rgba(255,215,0,.4)}
-.opp-header{display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f5f5f5;border-bottom:2px solid #ddd}
-.opp-avatar{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;color:#fff;flex-shrink:0}
-.opp-name{font-size:13px;font-weight:800;color:#111;flex:1}
-.opp-cards-badge{background:#FFD700;color:#000;font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;white-space:nowrap}
-.opp-body{padding:8px 10px;flex:1}
-.opp-prop-groups{display:flex;flex-direction:column;gap:4px}
-.opp-prop-row{display:flex;align-items:center;gap:4px}
-.opp-prop-label{font-size:8px;font-weight:700;min-width:48px}
-.opp-card-stack{position:relative;display:inline-flex;align-items:center;height:38px}
-.opp-footer{background:#f5f5f5;border-top:1px solid #ddd;padding:5px 10px;display:flex;justify-content:space-between;align-items:center}
-.opp-bank{font-size:11px;font-weight:700;color:#1a7a1a}
-.opp-turn-tag{font-size:9px;font-weight:800;color:#fff;background:#4CAF50;padding:2px 7px;border-radius:8px}
-
-/* ── YOUR TABLE (center panel) ── */
-#myTable{position:absolute;left:10px;right:290px;bottom:0;z-index:5;background:#f0f0f0;border:2px solid #bbb;border-radius:14px 14px 0 0;transition:bottom .35s cubic-bezier(.4,0,.2,1)}
-#myTable.hand-open{bottom:0} /* hand slides up above */
-.mt-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px 8px;border-bottom:2px solid #ddd}
-.mt-title{font-size:16px;font-weight:900;color:#111;letter-spacing:.5px}
-.mt-actions-badge{background:#FFD700;color:#000;font-size:12px;font-weight:900;padding:4px 14px;border-radius:8px;letter-spacing:.5px}
-.mt-body{padding:12px 16px;display:flex;gap:16px;min-height:180px}
-
-/* Bank section */
-.bank-section{min-width:200px;max-width:240px}
-.bank-section h4{font-size:11px;font-weight:800;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
-.bank-title-amt{font-size:11px;font-weight:700;color:#1a7a1a;margin-left:6px}
-.bank-cards-row{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;min-height:80px}
-
-/* Properties section */
-.props-section{flex:1;min-width:0}
-.props-section h4{font-size:11px;font-weight:800;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
-.props-groups-row{display:flex;flex-wrap:wrap;gap:10px}
-.prop-group-box{display:flex;flex-direction:column;gap:3px}
-.prop-group-label{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.3px}
-.prop-group-set{font-size:8px;font-weight:700;color:#888;margin-top:1px}
-.prop-group-set.complete{color:#c8860a;background:#fff8e1;padding:1px 5px;border-radius:4px}
-.prop-stack{position:relative;display:inline-block}
-.empty-slot{width:62px;height:88px;border:2px dashed #ccc;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#bbb;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
-
-/* ── BOTTOM ACTION BUTTONS ── */
-#actionButtons{position:absolute;right:290px;bottom:0;z-index:6;display:flex;gap:0}
-.ab-btn{padding:18px 28px;font-size:15px;font-weight:900;border:none;letter-spacing:.5px;display:flex;align-items:center;gap:8px}
-#btnPlayCard{background:#FFD700;color:#000;border-radius:0}
-#btnPlayCard:disabled{background:#ccc;color:#888;cursor:not-allowed}
-#btnEndTurn{background:#9c27b0;color:#fff;border-radius:0 0 0 0}
-#btnHandToggle{position:absolute;left:10px;bottom:0;z-index:6;background:#333;color:#fff;padding:12px 18px;font-size:12px;font-weight:700;border:none;border-radius:12px 12px 0 0;display:flex;align-items:center;gap:6px}
-
-/* ── HAND DRAWER ── */
-#handDrawer{position:absolute;left:0;right:0;bottom:-160px;z-index:7;background:#e8e8e8;border-top:3px solid #bbb;transition:bottom .35s cubic-bezier(.4,0,.2,1);padding:0}
-#handDrawer.open{bottom:0}
-.hd-header{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#ddd;border-bottom:1px solid #ccc}
-.hd-title{font-size:12px;font-weight:800;color:#333;letter-spacing:.5px;text-transform:uppercase}
-.hd-close{background:none;border:none;font-size:18px;color:#555;padding:0 4px;cursor:pointer}
-.hd-cards{display:flex;gap:10px;padding:10px 16px 14px;overflow-x:auto;min-height:135px;align-items:flex-start}
-
-/* ── DISCARD PILE (center table) ── */
-#discardArea{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) translateX(-140px) translateY(-60px);z-index:4;text-align:center}
-#discardPile{width:80px;height:110px;border:3px dashed rgba(255,255,255,.4);border-radius:10px;display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer}
-#discardPile .dc-label{font-size:11px;font-weight:700;color:rgba(255,255,255,.6);letter-spacing:.5px}
-#discardPile .dc-count{font-size:9px;color:rgba(255,255,255,.4);margin-top:2px}
-
-/* ── CARDS ── */
-.card{border-radius:8px;flex-shrink:0;cursor:pointer;border:2px solid rgba(0,0,0,.12);transition:transform .15s,box-shadow .15s,border-color .15s;position:relative;overflow:hidden;display:flex;flex-direction:column;user-select:none;background:#fff}
-.card.selected{border-color:#e65c00!important;transform:translateY(-12px);box-shadow:0 12px 28px rgba(230,90,0,.4)}
-.card.lg{width:90px;height:128px}
-.card.md{width:70px;height:100px}
-.card.sm{width:56px;height:80px}
-.card.xs{width:44px;height:63px}
-.card.xxs{width:32px;height:46px}
-
-/* money */
-.card-money{align-items:center;justify-content:center;background:#fff}
-.card-money .cm-border{position:absolute;inset:4px;border:2px solid currentColor;border-radius:5px;pointer-events:none}
-.card-money .cm-val{font-size:22px;font-weight:900;font-family:Georgia,serif;position:relative;z-index:1}
-.card-money .cm-lbl{font-size:7px;font-weight:700;letter-spacing:1px;text-transform:uppercase;opacity:.7;position:relative;z-index:1}
-/* color classes for money */
-.m1{color:#555}.m2{color:#f6b500}.m3{color:#1aa81a}.m4{color:#e55}.m5{color:#555}
-.m10{color:#1a5cbf}
-
-/* property */
-.card-prop{background:#fff;flex-direction:column}
-.card-prop .cp-color{display:flex;align-items:center;justify-content:center;padding:3px 4px;flex-shrink:0}
-.card-prop .cp-name{font-size:7px;font-weight:700;text-align:center;line-height:1.2;color:#fff}
-.card-prop .cp-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px 2px;gap:2px}
-.card-prop .cp-val{font-weight:900;color:#111}
-.card-prop .cp-set{font-size:7px;color:#888}
-.card-prop .cp-action{font-size:6px;text-align:center;color:#888;padding:2px 3px 3px;border-top:1px solid #eee;margin-top:auto}
-
-/* wild */
-.card-wild{background:#fff;align-items:center;justify-content:center;flex-direction:column;gap:2px}
-.card-wild .cw-rainbow{width:calc(100% - 8px);height:8px;border-radius:4px;background:linear-gradient(90deg,#e55,#f90,#ff0,#4c4,#49f,#a4f);margin:0 4px;flex-shrink:0}
-.card-wild .cw-title{font-size:8px;font-weight:800;color:#111;letter-spacing:.3px;text-align:center;padding:0 4px}
-.card-wild .cw-sub{font-size:6px;color:#888;text-align:center;padding:0 4px;line-height:1.3}
-.card-wild .cw-action{font-size:6px;color:#9c27b0;font-weight:700;padding:2px 3px 3px;border-top:1px solid #eee;margin-top:auto;text-align:center}
-
-/* action */
-.card-action{background:#fff;flex-direction:column}
-.card-action .ca-top{flex-shrink:0;padding:4px 5px 3px;text-align:center}
-.card-action .ca-icon{font-size:14px;line-height:1}
-.card-action .ca-name{font-size:7px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;color:#111;margin-top:1px}
-.card-action .ca-body{flex:1;display:flex;align-items:center;justify-content:center;padding:3px 4px;border-top:2px solid currentColor;border-bottom:2px solid currentColor}
-.card-action .ca-desc{font-size:7px;color:#333;text-align:center;line-height:1.4;font-weight:600}
-.card-action .ca-val{font-size:14px;font-weight:900;font-family:Georgia,serif;flex-shrink:0;padding:2px 0 3px;text-align:center}
-.card-action .ca-action{font-size:6px;text-align:center;padding:2px 3px 3px;font-weight:700}
-/* action card color classes */
-.ac-green{color:#1a8a1a;border-color:#1a8a1a}.ac-green .ca-action{color:#1a8a1a}
-.ac-blue{color:#1a5cbf;border-color:#1a5cbf}.ac-blue .ca-action{color:#1a5cbf}
-.ac-red{color:#c0392b;border-color:#c0392b}.ac-red .ca-action{color:#c0392b}
-.ac-orange{color:#e65c00;border-color:#e65c00}.ac-orange .ca-action{color:#e65c00}
-.ac-purple{color:#9c27b0;border-color:#9c27b0}.ac-purple .ca-action{color:#9c27b0}
-.ac-yellow{color:#b8860b;border-color:#b8860b}.ac-yellow .ca-action{color:#b8860b}
-
-/* card size adjustments */
-.card.xs .cm-val,.card.sm .cm-val{font-size:16px}
-.card.xxs .cm-val{font-size:12px}
-.card.xs .ca-icon,.card.sm .ca-icon{font-size:10px}
-.card.xxs .ca-icon,.card.xxs .ca-name,.card.xxs .ca-desc,.card.xxs .ca-val,.card.xxs .ca-action{font-size:5px}
-.card.xxs .ca-val{font-size:10px}
-
-/* ── MODALS ── */
+/* MODAL */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:200}
-.modal-box{background:#fff;border-radius:16px;padding:24px;max-width:400px;width:92%;max-height:82vh;overflow-y:auto;color:#111}
-.modal-title{font-size:17px;font-weight:900;margin-bottom:6px;color:#111}
-.modal-sub{font-size:12px;color:#555;margin-bottom:14px;line-height:1.5}
-.modal-btn{padding:9px 16px;border:none;border-radius:8px;font-weight:700;font-size:13px;margin:3px;cursor:pointer}
-.modal-btn.accent{background:#FFD700;color:#000}
-.modal-btn.ghost{background:#f0f0f0;color:#333;border:1px solid #ddd}
-.modal-btn.danger{background:#c0392b;color:#fff}
-.color-btn{display:block;width:100%;margin:4px 0;padding:10px 12px;border:none;border-radius:8px;font-weight:700;font-size:13px;text-align:left;cursor:pointer}
+.modal-box{background:white;border:4px solid black;box-shadow:8px 8px 0 0 rgba(0,0,0,1);padding:24px;max-width:400px;width:92%;max-height:82vh;overflow-y:auto;font-family:Montserrat,sans-serif}
+.modal-title{font-size:20px;font-weight:800;margin-bottom:8px}
+.modal-sub{font-size:13px;color:#555;margin-bottom:14px;line-height:1.5;font-family:'Archivo Narrow',sans-serif}
+.modal-btn{border:3px solid black;box-shadow:3px 3px 0 0 rgba(0,0,0,1);padding:9px 16px;font-weight:700;font-size:13px;margin:4px;cursor:pointer;font-family:Montserrat,sans-serif;transition:all .1s}
+.modal-btn:active{transform:translate(3px,3px);box-shadow:0 0 0 0}
+.modal-btn.accent{background:#ffe600;color:#000}
+.modal-btn.ghost{background:#f0f0f0;color:#333}
+.modal-btn.danger{background:#F44336;color:#fff}
+.color-btn{display:block;width:100%;margin:4px 0;padding:10px 12px;border:3px solid black;box-shadow:3px 3px 0 0 rgba(0,0,0,1);font-weight:700;font-size:13px;text-align:left;cursor:pointer;font-family:Montserrat,sans-serif;transition:all .1s}
+.color-btn:active{transform:translate(3px,3px);box-shadow:0 0 0 0}
 .discard-grid{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
-.warn-txt{color:#c0392b;font-size:12px;margin-bottom:8px;font-weight:700}
+.warn-txt{color:#F44336;font-size:12px;margin-bottom:8px;font-weight:700}
 
-/* ── JSN ── */
-.jsn-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;z-index:300}
-.jsn-box{background:#1a1a2e;border:3px solid #4444ff;border-radius:18px;padding:28px;max-width:360px;width:92%;text-align:center;color:#fff}
-.jsn-box h2{font-size:22px;font-weight:900;margin-bottom:8px}
-.jsn-box p{font-size:13px;color:#bbb;margin-bottom:22px;line-height:1.6}
+/* JSN */
+.jsn-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:300}
+.jsn-box{background:#1a1a2e;border:4px solid #4444ff;box-shadow:8px 8px 0 0 rgba(68,68,255,.5);padding:28px;max-width:360px;width:92%;text-align:center;color:#fff;font-family:Montserrat,sans-serif}
 
-/* ── WINNER ── */
-#winnerScreen{display:none;position:fixed;inset:0;background:rgba(0,0,0,.93);z-index:400;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:24px;color:#fff}
-#winnerScreen .trophy{font-size:80px;margin-bottom:14px}
-#winnerScreen h1{font-size:44px;color:#FFD700;font-weight:900;margin-bottom:6px}
-#winnerScreen p{font-size:18px;color:#aaa;margin-bottom:28px}
+/* WINNER */
+#winnerScreen{display:none;position:fixed;inset:0;background:rgba(0,0,0,.93);z-index:400;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:24px;color:#fff;font-family:Montserrat,sans-serif}
 
-/* ── TOAST / ALERT ── */
-#toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#111;color:#FFD700;padding:10px 22px;border-radius:50px;font-size:13px;font-weight:700;z-index:500;transition:opacity .4s;opacity:0;pointer-events:none;white-space:nowrap;border:1px solid rgba(255,215,0,.4)}
-#turnAlert{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:linear-gradient(135deg,#FFD700,#FFA500);color:#000;padding:18px 40px;border-radius:50px;font-size:20px;font-weight:900;z-index:500;display:none;letter-spacing:1px;box-shadow:0 8px 40px rgba(255,215,0,.6);animation:pop .3s ease}
+/* TOAST / TURN ALERT */
+#toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#111;color:#ffe600;padding:10px 22px;border:2px solid #ffe600;font-size:13px;font-weight:700;z-index:500;transition:opacity .4s;opacity:0;pointer-events:none;white-space:nowrap;font-family:Montserrat,sans-serif}
+#turnAlert{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#ffe600;color:#000;padding:18px 40px;font-size:22px;font-weight:900;z-index:500;display:none;letter-spacing:1px;border:4px solid black;box-shadow:8px 8px 0 0 rgba(0,0,0,1);font-family:Montserrat,sans-serif;animation:pop .3s ease}
 @keyframes pop{from{transform:translate(-50%,-50%) scale(.5)}to{transform:translate(-50%,-50%) scale(1)}}
+
+/* HAND DRAWER */
+#handDrawer{position:relative;overflow:hidden;transition:height .35s cubic-bezier(.4,0,.2,1)}
+#handDrawer.closed{height:0}
+#handDrawer.open{height:220px}
+
+/* LOBBY */
+#lobby{display:flex;align-items:center;justify-content:center;height:100vh;background:linear-gradient(160deg,#080810,#0d1a2a);font-family:Montserrat,sans-serif}
+#waitingRoom{display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:50;align-items:center;justify-content:center;font-family:Montserrat,sans-serif}
 </style>
 </head>
-<body>
+<body class="h-screen w-screen overflow-hidden flex flex-col font-archivo text-on-surface">
 
 <!-- LOBBY -->
 <div id="lobby">
-  <div class="lbox">
-    <div style="font-size:44px;margin-bottom:8px">🏦</div>
-    <h1>MONOPOLY</h1>
-    <h2>D E A L &nbsp;·&nbsp; O N L I N E</h2>
-    <div class="lbl">Your Name</div>
-    <input class="inp" id="myName" placeholder="Enter your name" maxlength="20"/>
-    <button class="btn-gold" onclick="createRoom()">🎲 Create Room</button>
-    <div class="divider"></div>
-    <div class="lbl">Join a room</div>
-    <input class="inp" id="joinCode" placeholder="6-digit room code" maxlength="6" style="text-transform:uppercase;letter-spacing:4px;text-align:center;font-weight:700" oninput="this.value=this.value.toUpperCase()"/>
-    <button class="btn-ghost" onclick="joinRoom()">🚪 Join Room</button>
-    <div id="lobbyStatus"></div>
+  <div class="nb-card p-8 w-full max-w-md text-center" style="font-family:Montserrat,sans-serif">
+    <div style="font-size:48px;margin-bottom:8px">🏦</div>
+    <h1 style="font-size:36px;font-weight:900;letter-spacing:2px;color:#6a5f00;margin-bottom:4px">MONOPOLY</h1>
+    <h2 style="font-size:13px;color:#888;letter-spacing:6px;margin-bottom:28px">D E A L &nbsp;·&nbsp; O N L I N E</h2>
+    <div style="font-size:11px;font-weight:800;margin-bottom:6px;text-align:left">YOUR NAME</div>
+    <input id="myName" placeholder="Enter your name" maxlength="20" style="width:100%;padding:10px 14px;border:3px solid black;background:#f9f9f9;font-size:14px;outline:none;margin-bottom:10px;font-family:Montserrat,sans-serif;box-shadow:3px 3px 0 0 rgba(0,0,0,1)"/>
+    <button onclick="createRoom()" class="nb-btn" style="width:100%;padding:14px;background:#ffe600;font-size:16px;font-weight:900;margin-top:4px">🎲 CREATE ROOM</button>
+    <div style="height:1px;background:#ddd;margin:20px 0"></div>
+    <div style="font-size:11px;font-weight:800;margin-bottom:6px;text-align:left">JOIN A ROOM</div>
+    <input id="joinCode" placeholder="6-DIGIT CODE" maxlength="6" oninput="this.value=this.value.toUpperCase()" style="width:100%;padding:10px 14px;border:3px solid black;background:#f9f9f9;font-size:18px;font-weight:800;letter-spacing:8px;text-align:center;outline:none;margin-bottom:10px;font-family:Montserrat,sans-serif;box-shadow:3px 3px 0 0 rgba(0,0,0,1)"/>
+    <button onclick="joinRoom()" class="nb-btn" style="width:100%;padding:12px;background:#e2e2e2;font-size:14px">🚪 JOIN ROOM</button>
+    <div id="lobbyStatus" style="font-size:12px;color:#888;margin-top:12px;min-height:18px"></div>
   </div>
 </div>
 
 <!-- WAITING ROOM -->
 <div id="waitingRoom">
-  <div class="lbox">
-    <div style="font-size:12px;color:#888;margin-bottom:4px">Room Code</div>
-    <div class="room-code" id="displayCode">——</div>
-    <div style="font-size:10px;color:#555;margin-bottom:16px">Share with your coworkers</div>
-    <div style="text-align:left;margin-bottom:12px">
-      <div class="lbl">Players (<span id="playerCount">1</span> joined)</div>
+  <div class="nb-card p-8 w-full max-w-md text-center" style="font-family:Montserrat,sans-serif">
+    <div style="font-size:12px;font-weight:800;color:#888;margin-bottom:6px">ROOM CODE</div>
+    <div id="displayCode" style="font-size:42px;font-weight:900;letter-spacing:12px;color:#6a5f00;background:#ffe600;border:3px solid black;padding:14px;margin-bottom:8px;box-shadow:4px 4px 0 0 rgba(0,0,0,1)">——</div>
+    <div style="font-size:11px;color:#888;margin-bottom:18px">Share with your coworkers</div>
+    <div style="text-align:left;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:800;margin-bottom:6px">PLAYERS (<span id="playerCount">1</span> joined)</div>
       <div id="playerSlots"></div>
     </div>
     <div id="startSection" style="display:none">
-      <div style="font-size:10px;color:#888;margin-bottom:6px">You are the host.</div>
-      <button class="btn-gold" id="startBtn" onclick="startGame()">▶ Start Game</button>
+      <div style="font-size:11px;color:#888;margin-bottom:8px">You are the host.</div>
+      <button id="startBtn" onclick="startGame()" class="nb-btn" style="width:100%;padding:14px;background:#ffe600;font-size:15px;font-weight:900">▶ START GAME</button>
     </div>
-    <div id="waitingMsg">Waiting for host to start...</div>
-    <button class="btn-ghost" style="margin-top:14px" onclick="location.reload()">← Back</button>
+    <div id="waitingMsg" style="font-size:12px;color:#888">Waiting for host to start...</div>
+    <button onclick="location.reload()" class="nb-btn" style="width:100%;padding:10px;background:#e2e2e2;font-size:13px;margin-top:14px">← BACK</button>
   </div>
 </div>
 
 <!-- GAME -->
-<div id="game">
-  <!-- Opponents top strip -->
-  <div id="opponentsArea"></div>
+<div id="game" style="display:none" class="flex-1 w-full relative flex flex-col overflow-hidden">
 
-  <!-- Right panel -->
-  <div id="rightPanel">
-    <div id="leaderboard">
-      <h3>Leaderboard</h3>
-      <div id="lbRows"></div>
-    </div>
-    <div id="logPanel">
-      <h3>Game Log <span style="font-size:16px">📋</span></h3>
-      <div id="logBody"></div>
-    </div>
+  <!-- Help button -->
+  <div class="fixed top-3 left-3 z-50">
+    <button onclick="location.reload()" class="nb-btn p-2 bg-primary-container flex items-center justify-center" title="Back to menu">
+      <span class="material-symbols-outlined text-2xl font-bold">arrow_back</span>
+    </button>
   </div>
 
-  <!-- Discard pile (center decoration) -->
-  <div id="discardArea">
-    <div id="discardPile">
-      <div>
-        <div class="dc-label">DISCARD</div>
-        <div class="dc-count" id="discardCount">0 cards</div>
+  <!-- Main area: table + right panel -->
+  <main class="flex-1 relative flex pr-0 lg:pr-80 overflow-hidden">
+
+    <!-- TABLE AREA -->
+    <div class="flex-1 flex flex-col relative p-3 h-full">
+
+      <!-- OPPONENTS ZONE -->
+      <div class="flex-1 relative min-h-0" id="opponentsZone">
+
+        <!-- Opponents rendered here by JS -->
+        <div id="oppTop" class="absolute top-2 left-1/2 -translate-x-1/2 flex flex-col items-center gap-3 z-10"></div>
+        <div id="oppLeft" class="absolute top-1/2 -translate-y-1/2 left-2 flex flex-col gap-4 z-10 items-start"></div>
+        <div id="oppRight" class="absolute top-1/2 -translate-y-1/2 right-2 flex flex-col gap-4 z-10 items-end"></div>
+
+        <!-- Center discard pile -->
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-10 p-6 bg-black/10 border-4 border-black border-dashed z-0" style="border-radius:0">
+          <div class="flex flex-col items-center">
+            <div id="discardTopCard" class="w-20 h-28 bg-white border-4 border-black shadow-[4px_4px_0_0_rgba(0,0,0,1)] flex flex-col p-1" style="transform:rotate(6deg)">
+              <div class="h-4 w-full bg-primary-container border-b-2 border-black mb-1"></div>
+              <div class="text-[9px] font-bold text-center" style="font-family:Montserrat,sans-serif">DISCARD</div>
+            </div>
+            <span class="mt-2 text-white font-bold text-xs bg-black px-2 py-1 uppercase tracking-tighter" style="font-family:Montserrat,sans-serif">Discard (<span id="discardCount">0</span>)</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- YOUR TABLE -->
+      <div id="myTable" class="w-full max-w-5xl mx-auto bg-surface-container-low/95 p-5 border-4 border-black shadow-[6px_6px_0_0_rgba(0,0,0,1)] backdrop-blur-md relative z-20 mb-2" style="flex-shrink:0">
+        <div class="flex justify-between items-center border-b-4 border-black pb-2 mb-3">
+          <h2 style="font-family:Montserrat,sans-serif;font-size:22px;font-weight:900;text-transform:uppercase">Your Table</h2>
+          <div id="actionsBadge" style="display:none;background:#ffe600;border:3px solid black;padding:4px 14px;font-family:Montserrat,sans-serif;font-size:12px;font-weight:800;box-shadow:3px 3px 0 0 rgba(0,0,0,1)">3 ACTIONS LEFT</div>
+        </div>
+        <div class="flex gap-6 items-start">
+          <!-- Bank -->
+          <div class="flex-shrink-0">
+            <h3 style="font-family:Montserrat,sans-serif;font-size:11px;font-weight:800;margin-bottom:8px">BANK (<span id="bankLabel">$0M</span>)</h3>
+            <div id="myBankCards" class="flex gap-2 flex-wrap" style="min-height:88px;align-items:flex-end"></div>
+          </div>
+          <!-- Properties -->
+          <div class="flex-1 border-l-4 border-black pl-6 min-h-[120px]">
+            <h3 style="font-family:Montserrat,sans-serif;font-size:11px;font-weight:800;margin-bottom:8px">PROPERTIES</h3>
+            <div id="myPropsGroups" class="flex gap-8 flex-wrap"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT PANEL -->
+    <div class="w-80 hidden lg:flex flex-col gap-3 z-20 absolute right-3 top-3" style="height:calc(100vh - 260px)">
+      <!-- Leaderboard -->
+      <div class="nb-card bg-primary text-on-primary p-4 flex-shrink-0">
+        <h3 style="font-family:Montserrat,sans-serif;font-size:16px;font-weight:800;border-bottom:2px solid black;padding-bottom:8px;margin-bottom:10px;color:white">Leaderboard</h3>
+        <ol id="lbRows" class="space-y-2" style="font-family:'Archivo Narrow',sans-serif;font-size:14px;font-weight:600"></ol>
+      </div>
+      <!-- Game Log -->
+      <div class="nb-card flex-1 flex flex-col bg-surface overflow-hidden">
+        <div class="bg-secondary text-white p-3 border-b-4 border-black flex justify-between items-center flex-shrink-0">
+          <span style="font-family:Montserrat,sans-serif;font-size:16px;font-weight:800">Game Log</span>
+          <span class="material-symbols-outlined">history_edu</span>
+        </div>
+        <div id="logBody" class="p-3 flex-1 overflow-y-auto space-y-2 bg-surface-container-low"></div>
       </div>
     </div>
-  </div>
 
-  <!-- YOUR TABLE -->
-  <div id="myTable">
-    <div class="mt-header">
-      <div class="mt-title">YOUR TABLE</div>
-      <div id="mt-badge" class="mt-actions-badge" style="display:none">3 ACTIONS LEFT</div>
+  </main>
+
+  <!-- HAND + ACTIONS FOOTER -->
+  <footer class="bg-surface-container-high border-t-8 border-black relative z-40 flex-shrink-0">
+
+    <!-- Floating action buttons -->
+    <div class="absolute -top-14 right-4 flex gap-3 z-50">
+      <!-- Bank button -->
+      <button id="btnBank" onclick="handleBankSelected()" class="nb-btn px-5 py-3 bg-tertiary-container text-on-tertiary-container flex items-center gap-2 text-sm" style="display:none!important">
+        <span class="material-symbols-outlined text-lg">savings</span> BANK
+      </button>
+      <!-- Play Card -->
+      <button id="btnPlay" onclick="handlePlaySelected()" disabled class="nb-btn px-6 py-3 bg-primary-container text-on-primary-container flex items-center gap-2" style="font-size:16px;font-weight:900">
+        <span class="material-symbols-outlined">bolt</span> PLAY CARD
+      </button>
+      <!-- End Turn -->
+      <button id="btnEnd" onclick="handleEndTurn()" class="nb-btn px-6 py-3 bg-secondary text-white flex items-center gap-2" style="font-size:16px;font-weight:900;display:none">
+        END TURN <span class="material-symbols-outlined">arrow_forward</span>
+      </button>
     </div>
-    <div class="mt-body">
-      <div class="bank-section">
-        <h4>BANK <span class="bank-title-amt" id="bankAmt">($0M)</span></h4>
-        <div class="bank-cards-row" id="myBankCards"></div>
-      </div>
-      <div class="props-section">
-        <h4>PROPERTIES</h4>
-        <div class="props-groups-row" id="myPropsGroups"></div>
-      </div>
+
+    <!-- Hand toggle -->
+    <div class="absolute -top-14 left-3 flex gap-2 z-50">
+      <button onclick="toggleHand()" class="nb-btn px-4 py-3 bg-white flex items-center gap-2 text-sm font-bold" style="font-family:Montserrat,sans-serif">
+        <span id="handToggleLabel" style="font-size:11px;font-weight:800">YOUR HAND (<span id="handCount">0</span>) ▲</span>
+      </button>
     </div>
-  </div>
 
-  <!-- Action buttons -->
-  <div id="actionButtons">
-    <button class="ab-btn" id="btnPlayCard" onclick="handlePlaySelected()" disabled>⚡ PLAY CARD</button>
-    <button class="ab-btn" id="btnEndTurn" onclick="handleEndTurn()">END TURN →</button>
-  </div>
-
-  <!-- Hand toggle button -->
-  <button id="btnHandToggle" onclick="toggleHand()">YOUR HAND (<span id="handCountBadge">0</span>) ▲</button>
-
-  <!-- Hand drawer -->
-  <div id="handDrawer">
-    <div class="hd-header">
-      <div class="hd-title">YOUR HAND (<span id="handCountInner">0</span> cards) — tap to select</div>
-      <button class="hd-close" onclick="toggleHand()">▼</button>
+    <!-- Hand drawer -->
+    <div id="handDrawer" class="closed">
+      <div class="hand-container w-full" id="handCards"></div>
     </div>
-    <div class="hd-cards" id="handCards"></div>
-  </div>
+
+    <!-- Collapsed hand label bar -->
+    <div id="handCollapsedBar" class="px-4 py-2 flex items-center gap-3" style="height:40px">
+      <span id="handCollapsedLabel" style="font-family:Montserrat,sans-serif;font-size:11px;font-weight:800;background:white;border:2px solid black;padding:2px 10px;box-shadow:2px 2px 0 0 rgba(0,0,0,1)">YOUR HAND (<span id="handCountBar">0</span>)</span>
+      <span style="font-size:10px;color:#888;font-family:Montserrat,sans-serif">click ▲ to show cards</span>
+    </div>
+
+  </footer>
 </div>
 
-<!-- Winner -->
+<!-- WINNER -->
 <div id="winnerScreen">
-  <div class="trophy">🏆</div>
-  <h1 id="winnerName">—</h1>
-  <p>Wins the game!</p>
-  <button class="btn-gold" style="width:200px;margin:0 auto" onclick="location.reload()">Play Again</button>
+  <div style="font-size:80px;margin-bottom:14px">🏆</div>
+  <h1 id="winnerName" style="font-size:44px;font-weight:900;color:#ffe600;margin-bottom:8px">—</h1>
+  <p style="font-size:18px;color:#aaa;margin-bottom:28px">Wins the game!</p>
+  <button onclick="location.reload()" class="nb-btn px-10 py-4" style="background:#ffe600;font-size:16px;font-weight:900">PLAY AGAIN</button>
 </div>
 
 <div id="toast"></div>
@@ -334,37 +262,37 @@ input{font-family:inherit}
 <div id="jsnContainer"></div>
 
 <script>
-// ── PLAYER COLORS ─────────────────────────────────────────────────────────
-const PCOLORS=["#e6a817","#2196F3","#e53935","#43a047","#9c27b0"];
+// ── CONSTANTS ─────────────────────────────────────────────────────────────
 const ABLY_KEY="h9Numw.ewX99A:0c9bWsH6l_guNErsFZsWCsd1f6Cdu3ka-GMZ5-H3FeE";
+const PCOLORS=["#FFA500","#0000FF","#F44336","#388E3C","#9c27b0"];
+const PNAMES_COLOR={
+  brown:"#795548",lightblue:"#29B6F6",pink:"#FF1493",orange:"#FFA500",
+  red:"#F44336",yellow:"#FFEB3B",green:"#388E3C",darkblue:"#1565C0",
+  railroad:"#424242",utility:"#78909C"
+};
+const PC={
+  brown:    {label:"Brown",     needed:2,bg:"#795548",fg:"#fff"},
+  lightblue:{label:"Lt.Blue",   needed:3,bg:"#29B6F6",fg:"#fff"},
+  pink:     {label:"Pink",      needed:3,bg:"#FF1493",fg:"#fff"},
+  orange:   {label:"Orange",    needed:3,bg:"#FFA500",fg:"#fff"},
+  red:      {label:"Red",       needed:3,bg:"#F44336",fg:"#fff"},
+  yellow:   {label:"Yellow",    needed:3,bg:"#FFEB3B",fg:"#333"},
+  green:    {label:"Green",     needed:3,bg:"#388E3C",fg:"#fff"},
+  darkblue: {label:"Dk.Blue",   needed:2,bg:"#1565C0",fg:"#fff"},
+  railroad: {label:"Railroad",  needed:4,bg:"#424242",fg:"#fff"},
+  utility:  {label:"Utility",   needed:2,bg:"#78909C",fg:"#fff"},
+};
+const RENT={brown:[1,2],lightblue:[1,2,3],pink:[1,2,4],orange:[1,3,5],red:[2,3,6],yellow:[2,4,6],green:[2,4,7],darkblue:[3,8],railroad:[1,2,3,4],utility:[1,2]};
+const MONEY_STYLE={1:{bg:"#E0F7FA",color:"#006064"},2:{bg:"#FFF9C4",color:"#F57F17"},3:{bg:"#FFF9C4",color:"#F57F17"},4:{bg:"#FFCDD2",color:"#B71C1C"},5:{bg:"#E8F5E9",color:"#1B5E20"},10:{bg:"#E3F2FD",color:"#0D47A1"}};
+
+let _id=0;const mk=(t,d)=>({id:++_id,type:t,...d});
 let ablyClient=null,channel=null;
 
-// ── PROP COLORS ───────────────────────────────────────────────────────────
-const PC={
-  brown:    {label:"Brown",     needed:2,bg:"#8B4513",fg:"#fff"},
-  lightblue:{label:"Lt. Blue",  needed:3,bg:"#87CEEB",fg:"#1a1a1a"},
-  pink:     {label:"Pink",      needed:3,bg:"#FF69B4",fg:"#fff"},
-  orange:   {label:"Orange",    needed:3,bg:"#FF8C00",fg:"#fff"},
-  red:      {label:"Red",       needed:3,bg:"#DC143C",fg:"#fff"},
-  yellow:   {label:"Yellow",    needed:3,bg:"#DAA520",fg:"#fff"},
-  green:    {label:"Green",     needed:3,bg:"#228B22",fg:"#fff"},
-  darkblue: {label:"Dk. Blue",  needed:2,bg:"#00008B",fg:"#fff"},
-  railroad: {label:"Railroad",  needed:4,bg:"#333",   fg:"#fff"},
-  utility:  {label:"Utility",   needed:2,bg:"#708090",fg:"#fff"},
-};
-const RENT={
-  brown:[1,2],lightblue:[1,2,3],pink:[1,2,4],orange:[1,3,5],
-  red:[2,3,6],yellow:[2,4,6],green:[2,4,7],darkblue:[3,8],
-  railroad:[1,2,3,4],utility:[1,2],
-};
-let _cid=0;
-const mk=(type,d)=>({id:++_cid,type,...d});
-
 function buildDeck(){
-  const cards=[];
+  const c=[];
   [1,2,3,4,5,6,7,8,9,10].forEach((v,i)=>{
-    const counts=[6,5,3,3,2,2,2,2,2,2];
-    for(let j=0;j<counts[i];j++) cards.push(mk("money",{value:v}));
+    const cnt=[6,5,3,3,2,2,2,2,2,2];
+    for(let j=0;j<cnt[i];j++) c.push(mk("money",{value:v}));
   });
   [["brown","Mediterranean Ave",1,2],["brown","Baltic Ave",1,2],
    ["lightblue","Oriental Ave",1,3],["lightblue","Vermont Ave",1,3],["lightblue","Connecticut Ave",1,3],
@@ -372,37 +300,33 @@ function buildDeck(){
    ["orange","St. James Pl",2,3],["orange","Tennessee Ave",2,3],["orange","New York Ave",2,3],
    ["red","Kentucky Ave",3,3],["red","Indiana Ave",3,3],["red","Illinois Ave",3,3],
    ["yellow","Atlantic Ave",3,3],["yellow","Ventnor Ave",3,3],["yellow","Marvin Gardens",3,3],
-   ["green","Pacific Ave",4,3],["green","N. Carolina Ave",4,3],["green","Pennsylvania Ave",4,3],
+   ["green","Pacific Ave",4,3],["green","N.Carolina Ave",4,3],["green","Pennsylvania Ave",4,3],
    ["darkblue","Park Place",4,2],["darkblue","Boardwalk",4,2],
    ["railroad","Reading RR",2,4],["railroad","Pennsylvania RR",2,4],["railroad","B&O RR",2,4],["railroad","Short Line RR",2,4],
    ["utility","Electric Co.",2,2],["utility","Water Works",2,2],
-  ].forEach(([color,name,value,count])=>{
-    for(let i=0;i<count;i++) cards.push(mk("property",{color,name,value}));
-  });
-  for(let i=0;i<2;i++) cards.push(mk("wild",{label:"Wild Property",sub:"Any color",value:0,colors:Object.keys(PC)}));
-  cards.push(mk("wild",{label:"Wild Property",sub:"RR + Utility",value:0,colors:["railroad","utility"]}));
-  cards.push(mk("wild",{label:"Wild Property",sub:"Green + Dk.Blue",value:0,colors:["green","darkblue"]}));
+  ].forEach(([color,name,value,count])=>{for(let i=0;i<count;i++) c.push(mk("property",{color,name,value}));});
+  for(let i=0;i<2;i++) c.push(mk("wild",{label:"Wild Property",sub:"Any color",value:0,colors:Object.keys(PC)}));
+  c.push(mk("wild",{label:"Wild Property",sub:"RR + Utility",value:0,colors:["railroad","utility"]}));
+  c.push(mk("wild",{label:"Wild Property",sub:"Green + Dk.Blue",value:0,colors:["green","darkblue"]}));
   [
-    {name:"Pass Go",      icon:"⚡",desc:"Draw 2 extra cards.",       cls:"ac-green", actionLbl:"Play Event",   value:1, count:10},
-    {name:"Debt Collector",icon:"💸",desc:"Collect $5M from any player.",cls:"ac-blue",actionLbl:"Play Action",  value:3, count:3},
-    {name:"Its My Birthday",icon:"🎂",desc:"Collect $2M from everyone.",cls:"ac-yellow",actionLbl:"Play Action", value:2, count:3},
-    {name:"Deal Breaker", icon:"💥",desc:"Steal a complete set.",      cls:"ac-red",  actionLbl:"Play Action",   value:5, count:2},
-    {name:"Sly Deal",     icon:"🦊",desc:"Steal one property card.",   cls:"ac-orange",actionLbl:"Play Action",  value:3, count:3},
-    {name:"Forced Deal",  icon:"🔄",desc:"Swap a property with anyone.",cls:"ac-orange",actionLbl:"Play Action", value:3, count:4},
-    {name:"Just Say No",  icon:"🚫",desc:"Cancel any action against you.",cls:"ac-purple",actionLbl:"Play Counter",value:4,count:3},
-    {name:"Hotel",        icon:"🏨",desc:"Add hotel to a full set.",   cls:"ac-green", actionLbl:"Play Upgrade",  value:4, count:3},
-    {name:"House",        icon:"🏠",desc:"Add house to a full set.",   cls:"ac-green", actionLbl:"Play Upgrade",  value:3, count:3},
-    {name:"Double Rent",  icon:"✖️",desc:"Double rent this turn.",     cls:"ac-blue",  actionLbl:"Play Modifier", value:1, count:2},
-    {name:"Rent (All)",   icon:"🏠",desc:"Charge rent to all players.",cls:"ac-red",   actionLbl:"Play Rent",     value:1, count:3,rentColors:Object.keys(PC)},
-    {name:"Rent Br/LB",   icon:"🏠",desc:"Rent: Brown or Lt.Blue.",    cls:"ac-red",   actionLbl:"Play Rent",     value:1, count:2,rentColors:["brown","lightblue"]},
-    {name:"Rent Pk/Or",   icon:"🏠",desc:"Rent: Pink or Orange.",      cls:"ac-red",   actionLbl:"Play Rent",     value:1, count:2,rentColors:["pink","orange"]},
-    {name:"Rent Re/Ye",   icon:"🏠",desc:"Rent: Red or Yellow.",       cls:"ac-red",   actionLbl:"Play Rent",     value:1, count:2,rentColors:["red","yellow"]},
-    {name:"Rent Gr/DB",   icon:"🏠",desc:"Rent: Green or Dk.Blue.",    cls:"ac-red",   actionLbl:"Play Rent",     value:1, count:2,rentColors:["green","darkblue"]},
-    {name:"Rent RR/Ut",   icon:"🏠",desc:"Rent: Railroad or Utility.", cls:"ac-red",   actionLbl:"Play Rent",     value:1, count:2,rentColors:["railroad","utility"]},
-  ].forEach(a=>{
-    for(let i=0;i<a.count;i++) cards.push(mk("action",{...a}));
-  });
-  return cards;
+    {name:"Pass Go",      icon:"bolt",    desc:"Draw 2 extra cards.",            lbl:"Play Event",   cls:"bg-primary-container",  count:10,value:1},
+    {name:"Debt Collector",icon:"payments",desc:"Collect $5M from any player.",  lbl:"Play Action",  cls:"bg-tertiary-container", count:3, value:3},
+    {name:"Its My Birthday",icon:"cake",  desc:"Collect $2M from everyone.",     lbl:"Play Action",  cls:"bg-primary-container",  count:3, value:2},
+    {name:"Deal Breaker", icon:"gavel",   desc:"Steal a complete property set.", lbl:"Play Action",  cls:"bg-red-100",            count:2, value:5},
+    {name:"Sly Deal",     icon:"swap_horiz",desc:"Steal one property card.",     lbl:"Play Action",  cls:"bg-orange-100",         count:3, value:3},
+    {name:"Forced Deal",  icon:"compare_arrows",desc:"Swap a property with anyone.",lbl:"Play Action",cls:"bg-orange-100",        count:4, value:3},
+    {name:"Just Say No",  icon:"block",   desc:"Cancel any action against you.", lbl:"Play Counter", cls:"bg-purple-100",         count:3, value:4},
+    {name:"Hotel",        icon:"hotel",   desc:"Add hotel to a full set.",       lbl:"Play Upgrade", cls:"bg-green-100",          count:3, value:4},
+    {name:"House",        icon:"house",   desc:"Add house to a full set.",       lbl:"Play Upgrade", cls:"bg-green-100",          count:3, value:3},
+    {name:"Double Rent",  icon:"close",   desc:"Double rent this turn.",         lbl:"Play Modifier",cls:"bg-blue-100",           count:2, value:1},
+    {name:"Rent (All)",   icon:"home",    desc:"Charge rent to all players.",    lbl:"Play Rent",    cls:"bg-red-100",rentColors:Object.keys(PC),count:3,value:1},
+    {name:"Rent Br/LB",   icon:"home",    desc:"Rent: Brown or Lt.Blue.",        lbl:"Play Rent",    cls:"bg-red-100",rentColors:["brown","lightblue"],count:2,value:1},
+    {name:"Rent Pk/Or",   icon:"home",    desc:"Rent: Pink or Orange.",          lbl:"Play Rent",    cls:"bg-red-100",rentColors:["pink","orange"],count:2,value:1},
+    {name:"Rent Re/Ye",   icon:"home",    desc:"Rent: Red or Yellow.",           lbl:"Play Rent",    cls:"bg-red-100",rentColors:["red","yellow"],count:2,value:1},
+    {name:"Rent Gr/DB",   icon:"home",    desc:"Rent: Green or Dk.Blue.",        lbl:"Play Rent",    cls:"bg-red-100",rentColors:["green","darkblue"],count:2,value:1},
+    {name:"Rent RR/Ut",   icon:"home",    desc:"Rent: Railroad or Utility.",     lbl:"Play Rent",    cls:"bg-red-100",rentColors:["railroad","utility"],count:2,value:1},
+  ].forEach(a=>{for(let i=0;i<a.count;i++) c.push(mk("action",{...a}));});
+  return c;
 }
 
 function shuffle(a){const b=[...a];for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b;}
@@ -411,15 +335,13 @@ function initGame(names){
   const players=names.map((name,i)=>({id:i,name,hand:[],bank:[],properties:{},improvements:{}}));
   players.forEach(p=>{p.hand=deck.splice(0,5);});
   return{deck,discard:[],players,currentPlayer:0,actionsLeft:3,phase:"draw",
-    log:[{text:"Game started! "+names[0]+" goes first.",pi:0,sys:false}],winner:null};
+    log:[{text:"Game started! "+names[0]+" goes first.",pi:-1,sys:true}],winner:null};
 }
 function checkWinner(p){return Object.entries(p.properties).filter(([c,a])=>a.length>=PC[c].needed).length>=3;}
 function getRent(p,color){
   const count=(p.properties[color]||[]).length;
-  const arr=RENT[color]||[];
-  const base=arr[Math.min(count-1,arr.length-1)]||0;
-  const impr=p.improvements[color]||{};
-  let bonus=0;
+  const arr=RENT[color]||[];const base=arr[Math.min(count-1,arr.length-1)]||0;
+  const impr=p.improvements[color]||{};let bonus=0;
   if(count>=(PC[color]?.needed||99)){if(impr.hotel)bonus=7;else if(impr.house)bonus=4;}
   return base+bonus;
 }
@@ -431,9 +353,9 @@ function addLog(g,text,pi,sys=false){g.log=[{text,pi,sys},...(g.log||[]).slice(0
 function payPlayer(debtor,creditor,owed){
   let paid=0;
   const sb=[...debtor.bank].sort((a,b)=>b.value-a.value);debtor.bank=[];
-  for(const c of sb){if(paid>=owed){debtor.bank.push(c);}else{creditor.bank.push(c);paid+=c.value;}}
+  for(const c of sb){if(paid>=owed)debtor.bank.push(c);else{creditor.bank.push(c);paid+=c.value;}}
   if(paid>=owed)return paid;
-  const ap=[];Object.entries(debtor.properties).forEach(([color,cards])=>{cards.forEach(c=>ap.push({color,card:c}));});
+  const ap=[];Object.entries(debtor.properties).forEach(([color,cards])=>cards.forEach(c=>ap.push({color,card:c})));
   ap.sort((a,b)=>a.card.value-b.card.value);
   for(const{color,card}of ap){
     if(paid>=owed)break;
@@ -446,73 +368,46 @@ function payPlayer(debtor,creditor,owed){
 
 // ── STATE ─────────────────────────────────────────────────────────────────
 let myName="",roomCode="",myPlayerIdx=-1,isHost=false,roomPlayers=[];
-let G=null,selectedCards=[],modalStep={},_pendingJSN=null;
-let handOpen=false;
+let G=null,selectedCards=[],modalStep={},_pendingJSN=null,handOpen=false;
 
 // ── SOUND ─────────────────────────────────────────────────────────────────
-function beep(f=520,d=180,v=0.3){try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=f;g.gain.value=v;o.start();o.stop(ctx.currentTime+d/1000);}catch(e){}}
+function beep(f=520,d=180,v=.3){try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.value=f;g.gain.value=v;o.start();o.stop(ctx.currentTime+d/1000);}catch(e){}}
 function turnBeep(){beep(520,100);setTimeout(()=>beep(660,160),110);}
 function jsnBeep(){beep(440,200,.4);setTimeout(()=>beep(350,250,.4),210);}
 
 // ── LOBBY ─────────────────────────────────────────────────────────────────
-function setStatus(msg,err=false){const el=document.getElementById("lobbyStatus");el.textContent=msg;el.style.color=err?"#f55":"#888";}
+function setStatus(msg,err=false){const el=document.getElementById("lobbyStatus");el.textContent=msg;el.style.color=err?"#F44336":"#888";}
 async function createRoom(){
-  myName=document.getElementById("myName").value.trim();
-  if(!myName){setStatus("Enter your name",true);return;}
+  myName=document.getElementById("myName").value.trim();if(!myName){setStatus("Enter your name",true);return;}
   roomCode=Math.random().toString(36).substr(2,6).toUpperCase();
   isHost=true;roomPlayers=[{name:myName,idx:0}];myPlayerIdx=0;
   setStatus("Creating room…");showWaiting();await subscribeRoom();
 }
 async function joinRoom(){
-  myName=document.getElementById("myName").value.trim();
-  const code=document.getElementById("joinCode").value.trim().toUpperCase();
-  if(!myName){setStatus("Enter your name",true);return;}
-  if(code.length<4){setStatus("Enter a valid room code",true);return;}
+  myName=document.getElementById("myName").value.trim();const code=document.getElementById("joinCode").value.trim().toUpperCase();
+  if(!myName){setStatus("Enter your name",true);return;}if(code.length<4){setStatus("Enter a valid code",true);return;}
   roomCode=code;isHost=false;setStatus("Joining…");showWaiting();await subscribeRoom();startPing();
 }
 let _pingTimer=null,_pingOk=false;
-function startPing(){
-  _pingOk=false;
-  _pingTimer=setInterval(()=>{if(_pingOk){clearInterval(_pingTimer);return;}channel.publish("join",{name:myName});},1500);
-  channel.publish("join",{name:myName});
-}
+function startPing(){_pingOk=false;_pingTimer=setInterval(()=>{if(_pingOk){clearInterval(_pingTimer);return;}channel.publish("join",{name:myName});},1500);channel.publish("join",{name:myName});}
 async function subscribeRoom(){
   ablyClient=new Ably.Realtime({key:ABLY_KEY});
   await new Promise((res,rej)=>{ablyClient.connection.once("connected",res);ablyClient.connection.once("failed",rej);});
   channel=ablyClient.channels.get("md-room-"+roomCode);
-  channel.subscribe("join",msg=>{
-    if(isHost){const n=msg.data.name;if(!roomPlayers.find(p=>p.name===n))roomPlayers.push({name:n,idx:roomPlayers.length});bcastRoom();}
-  });
+  channel.subscribe("join",msg=>{if(isHost){const n=msg.data.name;if(!roomPlayers.find(p=>p.name===n))roomPlayers.push({name:n,idx:roomPlayers.length});bcastRoom();}});
   channel.subscribe("room_state",msg=>{
     roomPlayers=msg.data.players;
     if(!isHost){const me=roomPlayers.find(p=>p.name===myName);if(me){myPlayerIdx=me.idx;_pingOk=true;clearInterval(_pingTimer);}}
     renderWaiting();
   });
-  channel.subscribe("game_start",msg=>{
-    _pingOk=true;clearInterval(_pingTimer);G=msg.data.game;showGame();
-    if(myPlayerIdx===0)setTimeout(autoDraw,500);
-  });
-  channel.subscribe("game_update",msg=>{
-    G=msg.data.game;renderGame();
-    if(G.winner){showWinner(G.winner);return;}
-    if(isMyTurn()){showTurnAlert();if(G.phase==="draw")setTimeout(autoDraw,600);}
-  });
-  channel.subscribe("jsn_prompt",msg=>{
-    if(msg.data.targetIdx!==myPlayerIdx)return;
-    showJSNPrompt(msg.data.actionLabel,msg.data.attackerIdx);
-  });
+  channel.subscribe("game_start",msg=>{_pingOk=true;clearInterval(_pingTimer);G=msg.data.game;showGame();if(myPlayerIdx===0)setTimeout(autoDraw,500);});
+  channel.subscribe("game_update",msg=>{G=msg.data.game;renderGame();if(G.winner){showWinner(G.winner);return;}if(isMyTurn()){showTurnAlert();if(G.phase==="draw")setTimeout(autoDraw,600);}});
+  channel.subscribe("jsn_prompt",msg=>{if(msg.data.targetIdx!==myPlayerIdx)return;showJSNPrompt(msg.data.actionLabel,msg.data.attackerIdx);});
   channel.subscribe("jsn_response",msg=>{
     if(msg.data.attackerIdx!==myPlayerIdx)return;
     document.getElementById("jsnContainer").innerHTML="";
-    if(msg.data.used){
-      G=clone(G);const t=G.players[msg.data.targetIdx];
-      const idx=t.hand.findIndex(c=>c.name==="Just Say No");
-      if(idx>=0){const[jsn]=t.hand.splice(idx,1);G.discard.push(jsn);}
-      addLog(G,t.name+" used Just Say No! Action cancelled.",msg.data.targetIdx);
-      _pendingJSN=null;bcastGame();closeModal();
-    }else{
-      if(_pendingJSN){_pendingJSN();_pendingJSN=null;}
-    }
+    if(msg.data.used){G=clone(G);const t=G.players[msg.data.targetIdx];const idx=t.hand.findIndex(c=>c.name==="Just Say No");if(idx>=0){const[j]=t.hand.splice(idx,1);G.discard.push(j);}addLog(G,t.name+" used Just Say No! Cancelled.",msg.data.targetIdx);_pendingJSN=null;bcastGame();closeModal();}
+    else{if(_pendingJSN){_pendingJSN();_pendingJSN=null;}}
   });
   if(isHost){await new Promise(r=>setTimeout(r,300));await bcastRoom();}
 }
@@ -526,93 +421,73 @@ function showWaiting(){
 function renderWaiting(){
   document.getElementById("playerCount").textContent=roomPlayers.length;
   const el=document.getElementById("playerSlots");
-  el.innerHTML=roomPlayers.map(p=>`<div class="pslot"><div class="dot"></div><div style="font-size:13px;font-weight:700">${p.name}</div>${p.idx===0?'<div style="font-size:10px;color:#888;margin-left:auto">Host</div>':""}</div>`).join("")
-    +`<div class="pslot"><div class="dot w"></div><div style="font-size:12px;color:#777">Waiting...</div></div>`;
+  el.innerHTML=roomPlayers.map(p=>`<div style="display:flex;align-items:center;gap:10px;background:#f9f9f9;border:2px solid black;padding:8px 12px;margin-bottom:6px;box-shadow:2px 2px 0 0 rgba(0,0,0,1)"><div style="width:8px;height:8px;border-radius:50%;background:#4CAF50;flex-shrink:0"></div><div style="font-size:13px;font-weight:700">${p.name}</div>${p.idx===0?'<div style="font-size:10px;color:#888;margin-left:auto;font-weight:700">HOST</div>':""}</div>`).join("")
+    +`<div style="display:flex;align-items:center;gap:10px;background:#f9f9f9;border:2px dashed #ccc;padding:8px 12px;margin-bottom:6px"><div style="font-size:12px;color:#aaa">Waiting for player...</div></div>`;
   if(isHost){
     document.getElementById("startSection").style.display="block";
     document.getElementById("waitingMsg").style.display="none";
     const btn=document.getElementById("startBtn");
     btn.disabled=roomPlayers.length<2;btn.style.opacity=roomPlayers.length<2?.5:1;
-    btn.textContent=roomPlayers.length<2?"Need 2+ players…":"▶ Start Game";
+    btn.textContent=roomPlayers.length<2?"NEED 2+ PLAYERS…":"▶ START GAME";
   }
 }
 async function startGame(){
   if(!isHost||roomPlayers.length<2)return;
   const names=roomPlayers.sort((a,b)=>a.idx-b.idx).map(p=>p.name);
-  G=initGame(names);await channel.publish("game_start",{game:G});
-  showGame();if(myPlayerIdx===0)setTimeout(autoDraw,500);
+  G=initGame(names);await channel.publish("game_start",{game:G});showGame();if(myPlayerIdx===0)setTimeout(autoDraw,500);
 }
 
 // ── GAME ──────────────────────────────────────────────────────────────────
 function showGame(){
   document.getElementById("waitingRoom").style.display="none";
   document.getElementById("lobby").style.display="none";
-  document.getElementById("game").style.display="block";
-  positionTable();
+  document.getElementById("game").style.display="flex";
   renderGame();if(isMyTurn())showTurnAlert();
 }
 async function bcastGame(){await channel.publish("game_update",{game:G});renderGame();if(G.winner)showWinner(G.winner);}
 function isMyTurn(){return G&&G.currentPlayer===myPlayerIdx;}
-
-function positionTable(){
-  // Position myTable above the hand drawer and action buttons
-  const mt=document.getElementById("myTable");
-  mt.style.bottom="0";
-  mt.style.top="auto";
-}
-
-function showTurnAlert(){
-  turnBeep();
-  const el=document.getElementById("turnAlert");el.style.display="block";
-  setTimeout(()=>{el.style.display="none";},1800);
-}
+function showTurnAlert(){turnBeep();const el=document.getElementById("turnAlert");el.style.display="block";setTimeout(()=>el.style.display="none",1800);}
 
 function toggleHand(){
   handOpen=!handOpen;
   const drawer=document.getElementById("handDrawer");
-  const btn=document.getElementById("btnHandToggle");
-  drawer.classList.toggle("open",handOpen);
-  btn.innerHTML="YOUR HAND (<span id='handCountBadge'>"+
-    (G?G.players[myPlayerIdx].hand.length:0)+"</span>) "+(handOpen?"▼":"▲");
+  const bar=document.getElementById("handCollapsedBar");
+  const lbl=document.getElementById("handToggleLabel");
+  drawer.className=handOpen?"open":"closed";
+  bar.style.display=handOpen?"none":"flex";
+  const cnt=G?G.players[myPlayerIdx].hand.length:0;
+  lbl.innerHTML="YOUR HAND ("+cnt+") "+(handOpen?"▼":"▲");
 }
 
 function autoDraw(){
   if(!isMyTurn()||G.phase!=="draw")return;
-  G=clone(G);const p=G.players[myPlayerIdx];
-  let drawn=0;
+  G=clone(G);const p=G.players[myPlayerIdx];let drawn=0;
   for(let i=0;i<2;i++){if(G.deck.length===0){G.deck=shuffle(G.discard);G.discard=[];}if(G.deck.length>0){p.hand.push(G.deck.pop());drawn++;}}
-  G.phase="play";addLog(G,p.name+" drew "+drawn+" card(s).",myPlayerIdx);
-  selectedCards=[];bcastGame();
+  G.phase="play";addLog(G,p.name+" drew "+drawn+" card(s).",myPlayerIdx);selectedCards=[];bcastGame();
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────
 function renderGame(){
   if(!G)return;
   const me=G.players[myPlayerIdx];
-  const cp=G.players[G.currentPlayer];
   const myTurn=isMyTurn();
-
-  // Leaderboard
-  renderLeaderboard();
-  // Opponents
-  renderOpponents();
-  // My table
-  renderMyTable(me,myTurn);
-  // Hand
-  renderHand(me,myTurn);
-  // Log
-  renderLog();
-  // Discard
-  document.getElementById("discardCount").textContent=(G.discard.length)+" cards";
-
-  // Action buttons
+  renderLeaderboard();renderOpponents();renderMyTable(me,myTurn);renderHand(me,myTurn);renderLog();
+  document.getElementById("discardCount").textContent=G.discard.length;
+  // Buttons
   const sel=selectedCards.map(i=>me.hand[i]).filter(Boolean);
-  const hasPlay=myTurn&&sel.length===1&&(sel[0].type==="property"||sel[0].type==="wild"||sel[0].type==="action");
-  document.getElementById("btnPlayCard").disabled=!hasPlay||G.actionsLeft===0;
-  document.getElementById("btnEndTurn").style.display=myTurn&&G.phase==="play"?"flex":"none";
-  document.getElementById("btnPlayCard").style.display=myTurn&&G.phase==="play"?"flex":"none";
-  // Hand toggle count
-  const hcb=document.getElementById("handCountBadge");if(hcb)hcb.textContent=me.hand.length;
+  const canPlay=myTurn&&G.phase==="play"&&sel.length===1&&(sel[0].type==="property"||sel[0].type==="wild"||sel[0].type==="action");
+  const canBank=myTurn&&G.phase==="play"&&sel.length>0&&sel.every(c=>c.type==="money"||c.type==="action");
+  document.getElementById("btnPlay").disabled=!canPlay||G.actionsLeft===0;
+  document.getElementById("btnPlay").style.display=myTurn&&G.phase==="play"?"flex":"none";
+  document.getElementById("btnEnd").style.display=myTurn&&G.phase==="play"?"flex":"none";
+  document.getElementById("btnBank").style.display=canBank?"flex":"none";
+  const badge=document.getElementById("actionsBadge");
+  if(myTurn&&G.phase==="play"){badge.style.display="block";badge.textContent=G.actionsLeft+" ACTION"+(G.actionsLeft!==1?"S":"")+" LEFT";}
+  else badge.style.display="none";
+  // Hand count everywhere
+  const cnt=me.hand.length;
+  ["handCount","handCountBar"].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=cnt;});
+  document.getElementById("handToggleLabel").innerHTML="YOUR HAND ("+cnt+") "+(handOpen?"▼":"▲");
 }
 
 function renderLeaderboard(){
@@ -620,242 +495,199 @@ function renderLeaderboard(){
   const sorted=[...G.players].sort((a,b)=>setsCount(b)-setsCount(a));
   sorted.forEach((p,rank)=>{
     const isMe=p.id===myPlayerIdx;
-    const div=document.createElement("div");
-    div.className="lb-row"+(isMe?" me":"");
-    div.innerHTML=`<div class="lb-rank">${rank+1}.</div>
-      <div class="lb-name" style="color:${PCOLORS[p.id%PCOLORS.length]}">${isMe?"You":p.name}</div>
-      <div class="lb-sets">${setsCount(p)} Set${setsCount(p)!==1?"s":""}</div>`;
+    const div=document.createElement("li");
+    div.style.cssText="display:flex;justify-content:space-between;align-items:center;padding:8px;border:2px solid "+(isMe?"black":"transparent")+";background:"+(isMe?"#ffe600":"transparent");
+    div.innerHTML=`<span style="font-weight:700;color:${isMe?"#000":PCOLORS[p.id%PCOLORS.length]}">${rank+1}. ${isMe?"You":p.name}</span><span style="font-size:12px;font-weight:700">${setsCount(p)} Set${setsCount(p)!==1?"s":""}</span>`;
     rows.appendChild(div);
   });
 }
 
 function renderOpponents(){
-  const area=document.getElementById("opponentsArea");area.innerHTML="";
-  G.players.forEach((p,i)=>{
-    if(i===myPlayerIdx)return;
-    const isT=G.currentPlayer===i;
-    const col=PCOLORS[i%PCOLORS.length];
-    const block=document.createElement("div");block.className="opp-block"+(isT?" is-turn":"");
+  const others=G.players.map((p,i)=>({...p,_i:i})).filter(p=>p._i!==myPlayerIdx);
+  const oppTop=document.getElementById("oppTop");
+  const oppLeft=document.getElementById("oppLeft");
+  const oppRight=document.getElementById("oppRight");
+  [oppTop,oppLeft,oppRight].forEach(z=>z.innerHTML="");
+  function place(zone,player){zone.appendChild(buildOppBlock(player));}
+  if(others.length===1) place(oppTop,others[0]);
+  else if(others.length===2){place(oppLeft,others[0]);place(oppRight,others[1]);}
+  else if(others.length===3){place(oppTop,others[0]);place(oppLeft,others[1]);place(oppRight,others[2]);}
+  else{place(oppTop,others[0]);others.slice(1,3).forEach(p=>place(oppLeft,p));others.slice(3).forEach(p=>place(oppRight,p));}
+}
 
-    // Header
-    const hdr=document.createElement("div");hdr.className="opp-header";
-    hdr.innerHTML=`<div class="opp-avatar" style="background:${col}">${p.name[0].toUpperCase()}</div>
-      <div class="opp-name">${p.name}</div>
-      <div class="opp-cards-badge">Cards: ${p.hand.length}</div>`;
-    block.appendChild(hdr);
-
-    // Body — property groups with stacked cards
-    const body=document.createElement("div");body.className="opp-body";
-    const groups=document.createElement("div");groups.className="opp-prop-groups";
-    const colorKeys=Object.keys(PC).filter(c=>(p.properties[c]||[]).length>0);
-    if(!colorKeys.length){
-      const e=document.createElement("div");e.style.cssText="font-size:10px;color:#aaa;padding:4px 0";e.textContent="No properties yet";groups.appendChild(e);
-    }
-    colorKeys.forEach(color=>{
-      const cards=p.properties[color]||[];
-      const needed=PC[color].needed;const complete=cards.length>=needed;
-      const row=document.createElement("div");row.className="opp-prop-row";
-      const lbl=document.createElement("div");lbl.className="opp-prop-label";
-      lbl.style.color=PC[color].bg;lbl.textContent=PC[color].label+(complete?" ✓":"");
-      // Stacked cards
-      const cardW=32,offset=8;
-      const stack=document.createElement("div");stack.className="opp-card-stack";
-      stack.style.width=(cardW+(cards.length-1)*offset)+"px";
-      cards.forEach((card,ci)=>{
-        const w=document.createElement("div");w.innerHTML=cardHTML(card,"xxs");
-        const inner=w.firstElementChild;
-        if(inner){inner.style.cssText=`position:absolute;left:${ci*offset}px;top:0;z-index:${ci};cursor:default;pointer-events:none;box-shadow:-2px 2px 4px rgba(0,0,0,.3)`;}
-        stack.appendChild(w);
-      });
-      row.appendChild(lbl);row.appendChild(stack);groups.appendChild(row);
-    });
-    body.appendChild(groups);block.appendChild(body);
-
-    // Footer
-    const ftr=document.createElement("div");ftr.className="opp-footer";
-    ftr.innerHTML=`<div class="opp-bank">💰 $${bankTotal(p)+propTotal(p)}M total (bank $${bankTotal(p)}M)</div>
-      ${isT?'<div class="opp-turn-tag">▶ TURN</div>':""}`;
-    block.appendChild(ftr);
-    area.appendChild(block);
+function buildOppBlock(p){
+  const isT=G.currentPlayer===p._i;
+  const col=PCOLORS[p._i%PCOLORS.length];
+  const wrap=document.createElement("div");wrap.style.cssText="display:flex;flex-direction:column;align-items:center;gap:8px";
+  // Name badge
+  const badge=document.createElement("div");
+  badge.style.cssText=`display:flex;align-items:center;gap:8px;background:white;border:4px solid black;padding:6px 14px;font-family:Montserrat,sans-serif;font-size:16px;font-weight:800;box-shadow:${isT?"0 0 0 3px #ffe600, 4px 4px 0 0 rgba(0,0,0,1)":"4px 4px 0 0 rgba(0,0,0,1)"}`;
+  badge.innerHTML=`<div style="width:28px;height:28px;background:${col};border:2px solid black;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:900">${p.name[0].toUpperCase()}</div>
+    <span>${p.name}</span>
+    <span style="background:#ffe600;border:2px solid black;padding:1px 8px;font-size:12px">Cards: ${p.hand.length}</span>`;
+  wrap.appendChild(badge);
+  // Bank + properties row
+  const row=document.createElement("div");row.style.cssText="display:flex;gap:16px;align-items:flex-start";
+  // Bank cards
+  const bankDiv=document.createElement("div");bankDiv.style.cssText="display:flex;gap:4px";
+  p.bank.slice(0,4).forEach(c=>{bankDiv.innerHTML+=miniMoneyHTML(c.value);});
+  if(p.bank.length>4){const more=document.createElement("div");more.style.cssText="font-size:9px;font-weight:700;align-self:center";more.textContent="+"+( p.bank.length-4);bankDiv.appendChild(more);}
+  row.appendChild(bankDiv);
+  // Properties
+  const propsDiv=document.createElement("div");propsDiv.style.cssText="display:flex;gap:8px;flex-wrap:wrap";
+  Object.keys(PC).forEach(color=>{
+    const cards=p.properties[color]||[];if(!cards.length)return;
+    const needed=PC[color].needed;const complete=cards.length>=needed;
+    const grp=document.createElement("div");grp.style.cssText="display:flex;flex-direction:column;align-items:center;gap:2px";
+    const stack=document.createElement("div");stack.className="mini-card-stack";
+    cards.forEach((card,ci)=>{stack.innerHTML+=miniPropHTML(card.name,PC[color].bg,PC[color].fg,ci);});
+    if(complete){const tag=document.createElement("div");tag.style.cssText="position:absolute;top:-6px;right:-6px;background:#ffe600;border:1px solid black;font-size:7px;font-weight:800;padding:1px 4px;z-index:10";tag.textContent="SET";stack.appendChild(tag);}
+    grp.appendChild(stack);
+    const lbl=document.createElement("span");lbl.style.cssText=`font-size:8px;font-weight:800;font-family:Montserrat,sans-serif;background:${complete?"#ffe600":"#e2e2e2"};border:1px solid black;padding:1px 4px;margin-top:${cards.length<=1?2:cards.length*10}px`;
+    lbl.textContent=cards.length+"/"+needed;grp.appendChild(lbl);
+    propsDiv.appendChild(grp);
   });
+  row.appendChild(propsDiv);wrap.appendChild(row);
+  // Money total footer
+  const footer=document.createElement("div");
+  footer.style.cssText="font-size:10px;font-weight:700;font-family:Montserrat,sans-serif;color:white;background:black;padding:2px 10px";
+  footer.textContent="Bank $"+bankTotal(p)+"M | Total $"+(bankTotal(p)+propTotal(p))+"M";
+  wrap.appendChild(footer);
+  return wrap;
+}
+
+function miniMoneyHTML(value){
+  const s=MONEY_STYLE[value]||MONEY_STYLE[1];
+  return `<div class="mini-card" style="background:${s.bg};justify-content:center;align-items:center;font-weight:800;color:${s.color};font-family:Montserrat,sans-serif">$${value}M</div>`;
+}
+function miniPropHTML(name,bg,fg,zIdx){
+  return `<div class="mini-card" style="z-index:${zIdx}"><div style="height:8px;background:${bg};border-bottom:1px solid black"></div><div style="font-size:7px;text-align:center;padding:2px 1px;font-family:Montserrat,sans-serif">${name}</div></div>`;
 }
 
 function renderMyTable(me,myTurn){
-  // Badge
-  const badge=document.getElementById("mt-badge");
-  if(myTurn&&G.phase==="play"){badge.style.display="block";badge.textContent=G.actionsLeft+" ACTION"+(G.actionsLeft!==1?"S":"")+" LEFT";}
-  else badge.style.display="none";
-
   // Bank
-  document.getElementById("bankAmt").textContent="($"+bankTotal(me)+"M)";
+  document.getElementById("bankLabel").textContent="$"+bankTotal(me)+"M";
   const bc=document.getElementById("myBankCards");bc.innerHTML="";
-  if(!me.bank.length){const e=document.createElement("div");e.style.cssText="font-size:11px;color:#aaa;align-self:center";e.textContent="Empty";bc.appendChild(e);}
-  else me.bank.forEach(c=>{bc.innerHTML+=cardHTML(c,"sm");});
-
+  if(!me.bank.length){bc.innerHTML='<div style="font-size:11px;color:#aaa;padding:4px">Empty</div>';}
+  else me.bank.forEach(c=>{bc.innerHTML+=miniMoneyHTML(c.value);});
   // Properties
   const pg=document.getElementById("myPropsGroups");pg.innerHTML="";
   const colors=Object.keys(PC).filter(c=>(me.properties[c]||[]).length>0);
-  if(!colors.length){
-    const e=document.createElement("div");e.style.cssText="font-size:11px;color:#aaa;align-self:center";e.textContent="No properties yet";pg.appendChild(e);
-  }
   colors.forEach(color=>{
-    const cards=me.properties[color]||[];
-    const needed=PC[color].needed;const complete=cards.length>=needed;const impr=me.improvements[color]||{};
-    const box=document.createElement("div");box.className="prop-group-box";
-    const lbl=document.createElement("div");lbl.className="prop-group-label";
-    lbl.style.color=PC[color].bg;lbl.textContent=PC[color].label;box.appendChild(lbl);
-    // Stacked cards
-    const cardW=56,offset=14;
-    const stack=document.createElement("div");stack.className="prop-stack";
-    stack.style.width=(cardW+(cards.length-1)*offset)+"px";stack.style.height="80px";
-    cards.forEach((card,ci)=>{
-      const w=document.createElement("div");w.innerHTML=cardHTML(card,"sm");
-      const inner=w.firstElementChild;
-      if(inner){inner.style.cssText=`position:absolute;left:${ci*offset}px;top:0;z-index:${ci};cursor:default;pointer-events:none;box-shadow:-2px 3px 6px rgba(0,0,0,.25)`;}
-      stack.appendChild(w);
-    });
+    const cards=me.properties[color]||[];const needed=PC[color].needed;const complete=cards.length>=needed;
+    const impr=me.improvements[color]||{};
+    const box=document.createElement("div");box.style.cssText="display:flex;flex-direction:column;align-items:center;gap:2px";
+    const stack=document.createElement("div");stack.className="mini-card-stack";
+    cards.forEach((card,ci)=>{stack.innerHTML+=miniPropHTML(card.name,PC[color].bg,PC[color].fg,ci);});
+    if(complete){
+      const tag=document.createElement("div");tag.style.cssText="position:absolute;top:-6px;right:-6px;background:#ffe600;border:2px solid black;font-size:8px;font-weight:800;padding:1px 5px;z-index:20;font-family:Montserrat,sans-serif";
+      tag.textContent=impr.hotel?"🏨":impr.house?"🏠":"SET";stack.appendChild(tag);
+    }
     box.appendChild(stack);
-    const setlbl=document.createElement("div");setlbl.className="prop-group-set"+(complete?" complete":"");
-    let setText=cards.length+"/"+needed+" SET";
-    if(complete&&impr.hotel)setText="🏨 HOTEL";else if(complete&&impr.house)setText="🏠 HOUSE";
-    setlbl.textContent=setText;box.appendChild(setlbl);
+    const lbl=document.createElement("span");
+    lbl.style.cssText=`font-size:8px;font-weight:800;font-family:Montserrat,sans-serif;background:${complete?"#ffe600":"#e2e2e2"};border:1px solid black;padding:1px 5px;margin-top:${cards.length<=1?2:cards.length*12+2}px`;
+    lbl.textContent=cards.length+"/"+needed+" SET";box.appendChild(lbl);
     pg.appendChild(box);
   });
-  // Empty slot hint
+  // Placeholder empty slot
   if(colors.length<3){
-    const empty=document.createElement("div");empty.className="empty-slot";
-    const label=["3rd","2nd","1st"][colors.length]||"";
-    empty.textContent=label+" SET";pg.appendChild(empty);
+    const empty=document.createElement("div");
+    empty.style.cssText="width:60px;height:88px;border:2px dashed #ccc;display:flex;align-items:center;justify-content:center;font-size:9px;color:#bbb;font-weight:700;font-family:Montserrat,sans-serif";
+    empty.textContent="+";pg.appendChild(empty);
   }
 }
 
 function renderHand(me,myTurn){
   const container=document.getElementById("handCards");container.innerHTML="";
-  document.getElementById("handCountInner").textContent=me.hand.length;
-  const hcb=document.getElementById("handCountBadge");if(hcb)hcb.textContent=me.hand.length;
   me.hand.forEach((card,i)=>{
-    const wrap=document.createElement("div");
-    wrap.innerHTML=cardHTML(card,"lg",selectedCards.includes(i));
-    const inner=wrap.firstElementChild;
-    if(inner){inner.onclick=()=>{
+    const div=document.createElement("div");
+    div.className="hand-card nb-card flex flex-col p-2"+(selectedCards.includes(i)?" selected":"");
+    div.innerHTML=handCardInner(card);
+    div.onclick=()=>{
       if(!isMyTurn()||G.phase!=="play")return;
       if(selectedCards.includes(i))selectedCards=selectedCards.filter(x=>x!==i);
       else selectedCards=[...selectedCards,i];
       renderGame();
-    };}
-    container.appendChild(inner||wrap);
+    };
+    container.appendChild(div);
   });
+}
+
+function handCardInner(card){
+  if(card.type==="money"){
+    const s=MONEY_STYLE[card.value]||MONEY_STYLE[1];
+    return `<div class="flex-1 flex flex-col items-center justify-center" style="background:${s.bg}">
+      <span style="font-family:Montserrat,sans-serif;font-size:36px;font-weight:900;color:${s.color}">$${card.value}M</span>
+    </div>
+    <div style="font-size:8px;text-align:center;border-top:2px solid black;padding:3px;font-family:Montserrat,sans-serif;font-weight:700">Action: Bank Money</div>`;
+  }
+  if(card.type==="property"){
+    return `<div style="height:24px;background:${PC[card.color].bg};border-bottom:2px solid black;display:flex;align-items:center;justify-content:center">
+        <span style="font-size:8px;font-weight:700;color:${PC[card.color].fg};font-family:Montserrat,sans-serif">${card.name}</span></div>
+      <div style="font-size:9px;text-align:center;padding:3px 2px;font-family:Montserrat,sans-serif;font-weight:700">${card.name}</div>
+      <div class="flex-1 flex items-center justify-center"><span style="font-size:20px;font-weight:900;font-family:Montserrat,sans-serif">$${card.value}M</span></div>
+      <div style="font-size:8px;text-align:center;border-top:2px solid black;padding:3px;font-family:Montserrat,sans-serif">Action: Play Property</div>`;
+  }
+  if(card.type==="wild"){
+    return `<div style="height:24px;background:linear-gradient(90deg,#FF1493,#0000FF,#FFA500);border-bottom:2px solid black"></div>
+      <div style="font-size:9px;text-align:center;padding:3px;font-family:Montserrat,sans-serif;font-weight:800;text-transform:uppercase">Wild Property</div>
+      <div class="flex-1 flex items-center justify-center text-center p-1" style="font-size:11px;font-family:'Archivo Narrow',sans-serif">${card.sub||"Any color property"}</div>
+      <div style="font-size:8px;text-align:center;border-top:2px solid black;padding:3px;font-family:Montserrat,sans-serif;font-weight:700;color:#a90097">Action: Play Wild</div>`;
+  }
+  if(card.type==="action"){
+    const isJSN=card.name==="Just Say No";
+    const isRent=card.name.startsWith("Rent");
+    const headerBg=isJSN?"#9c27b0":isRent?"#F44336":card.cls?.includes("primary")?"#ffe600":card.cls?.includes("tertiary")?"#59ffc9":"#e8e8e8";
+    const headerColor=isJSN||isRent?"white":"#333";
+    return `<div style="height:28px;background:${headerBg};border-bottom:2px solid black;display:flex;align-items:center;justify-content:center;gap:4px">
+        <span class="material-symbols-outlined" style="font-size:14px;color:${headerColor}">${card.icon||"bolt"}</span>
+      </div>
+      <div style="font-size:9px;text-align:center;padding:2px;font-family:Montserrat,sans-serif;font-weight:800;text-transform:uppercase;line-height:1.2">${card.name}</div>
+      <div class="flex-1 flex items-center justify-center text-center p-1" style="font-size:11px;font-family:'Archivo Narrow',sans-serif;font-weight:600;line-height:1.3">${card.desc}</div>
+      <div style="font-size:8px;text-align:center;border-top:2px solid black;padding:3px;font-family:Montserrat,sans-serif;font-weight:700;background:${headerBg};color:${headerColor}">Action: ${card.lbl||"Play"}</div>`;
+  }
+  return `<div class="flex-1 flex items-center justify-center" style="font-size:24px">🎴</div>`;
 }
 
 function renderLog(){
   const body=document.getElementById("logBody");body.innerHTML="";
   (G.log||[]).forEach((entry,i)=>{
-    const row=document.createElement("div");row.className="log-row"+(entry.sys?" system":"");
-    const who=document.createElement("div");who.className="log-who";
-    if(entry.sys){who.textContent="System";}
-    else{who.textContent=G.players[entry.pi||0]?.name||"?";who.style.color=PCOLORS[(entry.pi||0)%PCOLORS.length];}
-    const what=document.createElement("div");what.className="log-what";what.textContent=entry.text||entry;
-    row.appendChild(who);row.appendChild(what);
-    body.appendChild(row);
+    const div=document.createElement("div");
+    const isSys=entry.sys;
+    div.style.cssText=`background:${isSys?"#59ffc9":"white"};border:2px solid black;padding:8px 10px;box-shadow:2px 2px 0 0 rgba(0,0,0,1)${i>0?";opacity:"+(1-i*0.06):""}`;
+    const who=document.createElement("div");who.style.cssText="font-size:11px;font-weight:800;font-family:Montserrat,sans-serif;margin-bottom:2px";
+    who.style.color=isSys?"#007456":PCOLORS[(entry.pi||0)%PCOLORS.length];
+    who.textContent=isSys?"System":G.players[entry.pi||0]?.name||"?";
+    const what=document.createElement("div");what.style.cssText="font-size:13px;font-family:'Archivo Narrow',sans-serif;font-weight:500";what.textContent=entry.text||entry;
+    div.appendChild(who);div.appendChild(what);body.appendChild(div);
   });
 }
 
-// ── CARD HTML ─────────────────────────────────────────────────────────────
-function cardHTML(card,size="md",selected=false){
-  const sel=selected?" selected":"";
-  if(card.type==="money"){
-    const v=card.value;
-    const colorCls=v<=2?"m1":v===3?"m3":v===4?"m4":v>=10?"m10":"m2";
-    const fs=size==="lg"?"22px":size==="md"?"18px":size==="sm"?"14px":"10px";
-    return `<div class="card card-money ${size}${sel} ${colorCls}">
-      <div class="cm-border"></div>
-      <div class="cm-val" style="font-size:${fs}">$${v}M</div>
-      <div class="cm-lbl">MONEY</div>
-    </div>`;
-  }
-  if(card.type==="property"){
-    const p=PC[card.color];
-    const hh=size==="lg"?"32px":size==="md"?"26px":size==="sm"?"22px":"16px";
-    const vfs=size==="lg"?"18px":size==="md"?"14px":size==="sm"?"12px":"8px";
-    return `<div class="card card-prop ${size}${sel}">
-      <div class="cp-color" style="background:${p.bg};min-height:${hh}">
-        <div class="cp-name" style="color:${p.fg}">${card.name}</div>
-      </div>
-      <div class="cp-body">
-        <div class="cp-val" style="font-size:${vfs}">$${card.value}M</div>
-        <div class="cp-set">${p.label}</div>
-      </div>
-      ${size==="lg"||size==="md"?`<div class="cp-action">Action: Play Property</div>`:""}
-    </div>`;
-  }
-  if(card.type==="wild"){
-    const vfs=size==="lg"?"18px":size==="md"?"14px":"10px";
-    return `<div class="card card-wild ${size}${sel}">
-      <div class="cw-rainbow"></div>
-      <div class="cw-title">${card.label||"WILD PROPERTY"}</div>
-      <div class="cw-sub">${card.sub||""}</div>
-      ${size==="lg"||size==="md"?`<div class="cw-action">Action: Play Wild</div>`:""}
-    </div>`;
-  }
-  if(card.type==="action"){
-    const c=card;
-    const vfs=size==="lg"?"18px":size==="md"?"14px":"10px";
-    return `<div class="card card-action ${size}${sel} ${c.cls||"ac-green"}">
-      <div class="ca-top">
-        <div class="ca-icon">${c.icon||"⚡"}</div>
-        <div class="ca-name">${c.name}</div>
-      </div>
-      <div class="ca-body">
-        <div class="ca-desc">${c.desc}</div>
-      </div>
-      <div class="ca-val" style="font-size:${vfs}">$${c.value}M</div>
-      ${size==="lg"||size==="md"?`<div class="ca-action">Action: ${c.actionLbl||"Play"}</div>`:""}
-    </div>`;
-  }
-  return `<div class="card card-back ${size}">🎴</div>`;
-}
-
-// ── TURN ACTIONS ──────────────────────────────────────────────────────────
-function handleBank(){
-  if(!isMyTurn()||G.phase!=="play"||selectedCards.length===0)return;
+// ── ACTIONS ───────────────────────────────────────────────────────────────
+function handleBankSelected(){
+  if(!isMyTurn()||G.phase!=="play"||!selectedCards.length)return;
   G=clone(G);const p=G.players[myPlayerIdx];
   const sorted=[...selectedCards].sort((a,b)=>b-a);const banked=[];
-  sorted.forEach(i=>{
-    const c=p.hand[i];
-    if(c.name==="Just Say No"){showToast("Just Say No cannot be banked!");return;}
-    p.hand.splice(i,1);p.bank.push(c);banked.push("$"+c.value+"M");G.actionsLeft--;
-  });
+  sorted.forEach(i=>{const c=p.hand[i];if(c.name==="Just Say No"){showToast("Just Say No cannot be banked!");return;}p.hand.splice(i,1);p.bank.push(c);banked.push("$"+c.value+"M");G.actionsLeft--;});
   if(!banked.length){selectedCards=[];renderGame();return;}
-  addLog(G,p.name+" banked "+banked.join(", ")+".",myPlayerIdx);
-  selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();
+  addLog(G,p.name+" banked "+banked.join(", ")+".",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();
 }
-
 function handlePlaySelected(){
-  if(!isMyTurn()||G.phase!=="play"||selectedCards.length===0||G.actionsLeft===0)return;
-  const me=G.players[myPlayerIdx];
-  const cardIdx=selectedCards[0];const card=me.hand[cardIdx];if(!card)return;
-  if(card.type==="money"){handleBank();return;}
+  if(!isMyTurn()||G.phase!=="play"||!selectedCards.length||G.actionsLeft===0)return;
+  const me=G.players[myPlayerIdx];const cardIdx=selectedCards[0];const card=me.hand[cardIdx];if(!card)return;
+  if(card.type==="money"){handleBankSelected();return;}
   if(card.type==="property"){playProp(cardIdx,card.color);return;}
   if(card.type==="wild"){openModal({type:"pickWild",cardIdx,colors:card.colors});return;}
   if(card.type==="action")handleAction(card,cardIdx);
 }
-
 function playProp(cardIdx,color){
-  G=clone(G);const p=G.players[myPlayerIdx];
-  const[c]=p.hand.splice(cardIdx,1);
-  if(!p.properties[color])p.properties[color]=[];
-  if(c.type==="wild")c.chosenColor=color;
-  p.properties[color].push(c);G.actionsLeft--;
-  addLog(G,p.name+" played "+c.name+" ("+PC[color].label+").",myPlayerIdx);
+  G=clone(G);const p=G.players[myPlayerIdx];const[c]=p.hand.splice(cardIdx,1);
+  if(!p.properties[color])p.properties[color]=[];if(c.type==="wild")c.chosenColor=color;
+  p.properties[color].push(c);G.actionsLeft--;addLog(G,p.name+" played "+c.name+" ("+PC[color].label+").",myPlayerIdx);
   selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
 }
-
 function handleAction(card,cardIdx){
-  if(card.name==="Pass Go"){
-    G=clone(G);const p=G.players[myPlayerIdx];p.hand.splice(cardIdx,1);G.discard.push(card);
-    for(let i=0;i<2;i++){if(G.deck.length===0){G.deck=shuffle(G.discard);G.discard=[];}if(G.deck.length>0)p.hand.push(G.deck.pop());}
-    G.actionsLeft--;addLog(G,p.name+" played Pass Go — drew 2 cards.",myPlayerIdx);selectedCards=[];bcastGame();
-  }
+  if(card.name==="Pass Go"){G=clone(G);const p=G.players[myPlayerIdx];p.hand.splice(cardIdx,1);G.discard.push(card);for(let i=0;i<2;i++){if(!G.deck.length){G.deck=shuffle(G.discard);G.discard=[];}if(G.deck.length)p.hand.push(G.deck.pop());}G.actionsLeft--;addLog(G,p.name+" played Pass Go — drew 2 cards.",myPlayerIdx);selectedCards=[];bcastGame();}
   else if(card.name==="Its My Birthday")openModal({type:"birthday",cardIdx});
   else if(card.name==="Debt Collector")openModal({type:"debtCollector",cardIdx});
   else if(card.name==="Sly Deal")openModal({type:"slyDeal",cardIdx});
@@ -863,22 +695,16 @@ function handleAction(card,cardIdx){
   else if(card.name.startsWith("Rent"))openModal({type:"rent",cardIdx,rentColors:card.rentColors});
   else if(card.name==="House"||card.name==="Hotel")openModal({type:"improvement",cardIdx,improvType:card.name.toLowerCase()});
   else if(card.name==="Forced Deal")openModal({type:"forcedDeal",cardIdx});
-  else if(card.name==="Just Say No")showToast("Just Say No can only cancel an action played against you!");
-  else handleBank();
+  else if(card.name==="Just Say No")showToast("Just Say No can only cancel an action against you!");
+  else handleBankSelected();
 }
-
 function handleEndTurn(){
   if(!isMyTurn()||G.phase==="draw")return;
-  const me=G.players[myPlayerIdx];
-  if(me.hand.length>7){openModal({type:"discard",excess:me.hand.length-7});return;}
-  advanceTurn();
+  const me=G.players[myPlayerIdx];if(me.hand.length>7){openModal({type:"discard",excess:me.hand.length-7});return;}advanceTurn();
 }
-
 function advanceTurn(){
-  G=clone(G);G.currentPlayer=(G.currentPlayer+1)%G.players.length;
-  G.actionsLeft=3;G.phase="draw";
-  addLog(G,"It is "+G.players[G.currentPlayer].name+"'s turn.",G.currentPlayer);
-  selectedCards=[];bcastGame();closeModal();
+  G=clone(G);G.currentPlayer=(G.currentPlayer+1)%G.players.length;G.actionsLeft=3;G.phase="draw";
+  addLog(G,"It is "+G.players[G.currentPlayer].name+"'s turn.",G.currentPlayer,true);selectedCards=[];bcastGame();closeModal();
 }
 
 // ── JSN ───────────────────────────────────────────────────────────────────
@@ -889,220 +715,107 @@ function checkJSN(targetPlayerIdx,actionLabel,onConfirm){
   const jsnC=document.getElementById("jsnContainer");jsnC.innerHTML="";
   const ov=document.createElement("div");ov.className="jsn-overlay";
   const bx=document.createElement("div");bx.className="jsn-box";
-  bx.innerHTML=`<h2>⏳ Waiting...</h2><p>Asking <strong>${target.name}</strong> if they want to use Just Say No against:<br><em>${actionLabel}</em></p>`;
+  bx.innerHTML=`<h2 style="font-size:20px;font-weight:900;margin-bottom:8px">⏳ Waiting...</h2><p style="font-size:13px;color:#bbb;margin-bottom:20px">Asking <strong>${target.name}</strong> if they want to use<br><strong>Just Say No</strong> against:<br><em>${actionLabel}</em></p>`;
   const cb=document.createElement("button");cb.className="modal-btn ghost";cb.textContent="Cancel";
-  cb.onclick=()=>{_pendingJSN=null;jsnC.innerHTML="";closeModal();};
-  bx.appendChild(cb);ov.appendChild(bx);jsnC.appendChild(ov);
+  cb.onclick=()=>{_pendingJSN=null;jsnC.innerHTML="";closeModal();};bx.appendChild(cb);ov.appendChild(bx);jsnC.appendChild(ov);
   channel.publish("jsn_prompt",{targetIdx:targetPlayerIdx,attackerIdx:myPlayerIdx,actionLabel});
 }
 function showJSNPrompt(actionLabel,attackerIdx){
-  jsnBeep();
-  const attacker=G.players[attackerIdx];
+  jsnBeep();const attacker=G.players[attackerIdx];
   const jsnC=document.getElementById("jsnContainer");jsnC.innerHTML="";
   const ov=document.createElement("div");ov.className="jsn-overlay";
   const bx=document.createElement("div");bx.className="jsn-box";
-  bx.innerHTML=`<h2>🚫 Just Say No?</h2><p><strong>${attacker.name}</strong> is playing:<br><em>${actionLabel}</em><br><br>Use your Just Say No to block it?</p>`;
-  const yBtn=document.createElement("button");yBtn.className="modal-btn danger";yBtn.style.cssText="width:100%;padding:14px;margin-bottom:8px;font-size:15px";yBtn.textContent="🚫 Just Say No!";
-  yBtn.onclick=()=>{jsnC.innerHTML="";channel.publish("jsn_response",{attackerIdx,targetIdx:myPlayerIdx,used:true});};
-  const nBtn=document.createElement("button");nBtn.className="modal-btn ghost";nBtn.style.cssText="width:100%;padding:12px";nBtn.textContent="Allow it";
-  nBtn.onclick=()=>{jsnC.innerHTML="";channel.publish("jsn_response",{attackerIdx,targetIdx:myPlayerIdx,used:false});};
-  bx.appendChild(yBtn);bx.appendChild(nBtn);ov.appendChild(bx);jsnC.appendChild(ov);
+  bx.innerHTML=`<h2 style="font-size:22px;font-weight:900;margin-bottom:8px">🚫 Just Say No?</h2><p style="font-size:13px;color:#bbb;margin-bottom:20px"><strong>${attacker.name}</strong> is playing:<br><em>${actionLabel}</em><br><br>Block it?</p>`;
+  const yb=document.createElement("button");yb.className="modal-btn danger";yb.style.cssText="width:100%;padding:14px;font-size:15px;margin-bottom:8px";yb.textContent="🚫 JUST SAY NO!";
+  yb.onclick=()=>{jsnC.innerHTML="";channel.publish("jsn_response",{attackerIdx,targetIdx:myPlayerIdx,used:true});};
+  const nb=document.createElement("button");nb.className="modal-btn ghost";nb.style.cssText="width:100%;padding:12px";nb.textContent="Allow it";
+  nb.onclick=()=>{jsnC.innerHTML="";channel.publish("jsn_response",{attackerIdx,targetIdx:myPlayerIdx,used:false});};
+  bx.appendChild(yb);bx.appendChild(nb);ov.appendChild(bx);jsnC.appendChild(ov);
 }
 
 // ── MODAL ─────────────────────────────────────────────────────────────────
 let currentModal=null;
 function openModal(m){currentModal=m;modalStep={};renderModal();}
 function closeModal(){currentModal=null;modalStep={};document.getElementById("modalContainer").innerHTML="";}
-
 function renderModal(){
   if(!currentModal){closeModal();return;}
-  const m=currentModal;const me=G.players[myPlayerIdx];
-  const others=G.players.filter((_,i)=>i!==myPlayerIdx);
+  const m=currentModal;const me=G.players[myPlayerIdx];const others=G.players.filter((_,i)=>i!==myPlayerIdx);
   const mc=document.getElementById("modalContainer");mc.innerHTML="";
   const ov=document.createElement("div");ov.className="modal-overlay";
   const bx=document.createElement("div");bx.className="modal-box";
   bx.onclick=e=>e.stopPropagation();ov.appendChild(bx);mc.appendChild(ov);
   function T(t){const d=document.createElement("div");d.className="modal-title";d.textContent=t;bx.appendChild(d);}
   function S(t){const d=document.createElement("div");d.className="modal-sub";d.textContent=t;bx.appendChild(d);}
-  function B(lbl,cls,fn){const b=document.createElement("button");b.className="modal-btn "+cls;b.textContent=lbl;b.onclick=fn;bx.appendChild(b);return b;}
-  function CB(lbl,bg,fg,fn){const b=document.createElement("button");b.className="color-btn";b.style.cssText=`background:${bg};color:${fg}`;b.textContent=lbl;b.onclick=fn;bx.appendChild(b);}
+  function B(lbl,cls,fn){const b=document.createElement("button");b.className="modal-btn "+cls;b.textContent=lbl;b.onclick=fn;bx.appendChild(b);}
+  function CB(lbl,bg,fg,fn){const b=document.createElement("button");b.className="color-btn";b.style.cssText="background:"+bg+";color:"+fg;b.textContent=lbl;b.onclick=fn;bx.appendChild(b);}
   function W(t){const d=document.createElement("div");d.className="warn-txt";d.textContent=t;bx.appendChild(d);}
 
-  if(m.type==="pickWild"){
-    T("Pick Color for Wild Card");S("Which color group to add this to?");
-    m.colors.forEach(c=>{const p=PC[c];if(p)CB(p.label,p.bg,p.fg,()=>playProp(m.cardIdx,c));});
-    B("Cancel","ghost",closeModal);
-  }
-  else if(m.type==="birthday"){
-    T("🎂 It's My Birthday!");S("Collect $2M from every player. Bank and properties used if needed.");
-    B("Collect!","accent",()=>resolveM("birthday"));B("Cancel","ghost",closeModal);
-  }
-  else if(m.type==="debtCollector"){
-    T("💸 Debt Collector");S("Collect $5M from:");
-    others.forEach(p=>{B(p.name+" (bank $"+bankTotal(p)+"M)","accent",()=>checkJSN(p.id,"Debt Collector $5M",()=>resolveM("debtCollector",p.id)));});
-    B("Cancel","ghost",closeModal);
-  }
+  if(m.type==="pickWild"){T("Pick Color for Wild Card");S("Which color group?");m.colors.forEach(c=>{const p=PC[c];if(p)CB(p.label,p.bg,p.fg,()=>playProp(m.cardIdx,c));});B("Cancel","ghost",closeModal);}
+  else if(m.type==="birthday"){T("🎂 It's My Birthday!");S("Collect $2M from every player.");B("Collect!","accent",()=>resolveM("birthday"));B("Cancel","ghost",closeModal);}
+  else if(m.type==="debtCollector"){T("💸 Debt Collector");S("Collect $5M from:");others.forEach(p=>{B(p.name+" (bank $"+bankTotal(p)+"M)","accent",()=>checkJSN(p.id,"Debt Collector $5M",()=>resolveM("debtCollector",p.id)));});B("Cancel","ghost",closeModal);}
   else if(m.type==="rent"){
     const avail=(m.rentColors||[]).filter(c=>(me.properties[c]||[]).length>0);
-    if(!modalStep.color){
-      T("🏠 Charge Rent");S("Pick color:");
-      if(!avail.length)W("No matching properties!");
-      avail.forEach(c=>{const p=PC[c];CB(p.label+" — $"+getRent(me,c)+"M ("+((me.properties[c]||[]).length)+"/"+p.needed+")",p.bg,p.fg,()=>{modalStep.color=c;renderModal();});});
-      B("Cancel","ghost",closeModal);
-    }else{
-      const color=modalStep.color;const rent=getRent(me,color);const isAll=(m.rentColors||[]).length>4;
-      if(isAll){
-        T("Charge all players?");S("Charge $"+rent+"M ("+PC[color].label+") from everyone?");
-        B("Charge Everyone!","accent",()=>resolveM("rentAll"));B("Cancel","ghost",closeModal);
-      }else{
-        T("Pick player to charge");S("$"+rent+"M for "+PC[color].label+":");
-        others.forEach(p=>{B(p.name+" (bank $"+bankTotal(p)+"M)","accent",()=>checkJSN(p.id,"Rent $"+rent+"M on "+PC[color].label,()=>resolveM("rentOne",p.id)));});
-        B("Cancel","ghost",closeModal);
-      }
+    if(!modalStep.color){T("🏠 Charge Rent");S("Pick color:");if(!avail.length)W("No matching properties!");avail.forEach(c=>{const p=PC[c];CB(p.label+" — $"+getRent(me,c)+"M ("+((me.properties[c]||[]).length)+"/"+p.needed+")",p.bg,p.fg,()=>{modalStep.color=c;renderModal();});});B("Cancel","ghost",closeModal);}
+    else{const color=modalStep.color;const rent=getRent(me,color);const isAll=(m.rentColors||[]).length>4;
+      if(isAll){T("Charge all?");S("Charge $"+rent+"M ("+PC[color].label+") from everyone?");B("Charge Everyone!","accent",()=>resolveM("rentAll"));B("Cancel","ghost",closeModal);}
+      else{T("Pick player");S("$"+rent+"M for "+PC[color].label+":");others.forEach(p=>{B(p.name+" (bank $"+bankTotal(p)+"M)","accent",()=>checkJSN(p.id,"Rent $"+rent+"M on "+PC[color].label,()=>resolveM("rentOne",p.id)));});B("Cancel","ghost",closeModal);}
     }
   }
   else if(m.type==="slyDeal"){
-    if(modalStep.targetId===undefined){
-      T("🦊 Sly Deal");others.forEach(p=>{B(p.name,"accent",()=>{modalStep.targetId=p.id;renderModal();});});B("Cancel","ghost",closeModal);
-    }else{
-      const tgt=G.players[modalStep.targetId];
-      const stealable=Object.entries(tgt.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);
-      if(!modalStep.color){
-        T("Pick their color");if(!stealable.length)W("No incomplete sets!");
-        stealable.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.color=c;renderModal();});});
-        B("Back","ghost",()=>{modalStep.targetId=undefined;renderModal();});B("Cancel","ghost",closeModal);
-      }else{
-        T("Pick their card");
-        (tgt.properties[modalStep.color]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Sly Deal — steal "+c.name,()=>resolveM("slyDeal",i)));});
-        B("Back","ghost",()=>{modalStep.color=undefined;renderModal();});B("Cancel","ghost",closeModal);
-      }
+    if(modalStep.targetId===undefined){T("🦊 Sly Deal");others.forEach(p=>{B(p.name,"accent",()=>{modalStep.targetId=p.id;renderModal();});});B("Cancel","ghost",closeModal);}
+    else{const tgt=G.players[modalStep.targetId];const stealable=Object.entries(tgt.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);
+      if(!modalStep.color){T("Pick their color");if(!stealable.length)W("No incomplete sets!");stealable.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.color=c;renderModal();});});B("Back","ghost",()=>{modalStep.targetId=undefined;renderModal();});B("Cancel","ghost",closeModal);}
+      else{T("Pick their card");(tgt.properties[modalStep.color]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Sly Deal",()=>resolveM("slyDeal",i)));});B("Back","ghost",()=>{modalStep.color=undefined;renderModal();});B("Cancel","ghost",closeModal);}
     }
   }
   else if(m.type==="dealBreaker"){
     const sets=[];G.players.forEach((p,pi)=>{if(pi===myPlayerIdx)return;Object.entries(p.properties).forEach(([c,a])=>{if(a.length>=PC[c].needed)sets.push({player:p,playerIdx:pi,color:c});});});
     T("💥 Deal Breaker");if(!sets.length)W("No complete sets to steal!");
-    sets.forEach(({player,playerIdx,color})=>{const p=PC[color];CB(player.name+"'s "+p.label,p.bg,p.fg,()=>checkJSN(playerIdx,"Deal Breaker — steal "+p.label,()=>resolveM("dealBreaker",playerIdx,color)));});
-    B("Cancel","ghost",closeModal);
+    sets.forEach(({player,playerIdx,color})=>{const p=PC[color];CB(player.name+"'s "+p.label,p.bg,p.fg,()=>checkJSN(playerIdx,"Deal Breaker",()=>resolveM("dealBreaker",playerIdx,color)));});B("Cancel","ghost",closeModal);
   }
   else if(m.type==="forcedDeal"){
-    if(modalStep.targetId===undefined){
-      T("🔄 Forced Deal");const vt=others.filter(p=>Object.entries(p.properties).some(([c,a])=>a.length>0&&a.length<PC[c].needed));
-      if(!vt.length)W("No swappable properties!");
-      vt.forEach(p=>{B(p.name,"accent",()=>{modalStep.targetId=p.id;renderModal();});});B("Cancel","ghost",closeModal);
-    }else if(modalStep.theirColor===undefined){
-      const tgt=G.players[modalStep.targetId];
-      const stealable=Object.entries(tgt.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);
-      T("Their property");if(!stealable.length)W("No incomplete sets!");
-      stealable.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.theirColor=c;renderModal();});});
-      B("Back","ghost",()=>{modalStep.targetId=undefined;renderModal();});B("Cancel","ghost",closeModal);
-    }else if(modalStep.theirPropIdx===undefined){
-      T("Pick their card");
-      (G.players[modalStep.targetId].properties[modalStep.theirColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>{modalStep.theirPropIdx=i;renderModal();});});
-      B("Back","ghost",()=>{modalStep.theirColor=undefined;renderModal();});B("Cancel","ghost",closeModal);
-    }else if(modalStep.myColor===undefined){
-      const mySw=Object.entries(me.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);
-      T("Your property to give");if(!mySw.length)W("No incomplete sets to give!");
-      mySw.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.myColor=c;renderModal();});});
-      B("Back","ghost",()=>{modalStep.theirPropIdx=undefined;renderModal();});B("Cancel","ghost",closeModal);
-    }else{
-      T("Pick your card to give");
-      (me.properties[modalStep.myColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Forced Deal",()=>resolveM("forcedDeal",i)));});
-      B("Back","ghost",()=>{modalStep.myColor=undefined;renderModal();});B("Cancel","ghost",closeModal);
-    }
+    if(modalStep.targetId===undefined){T("🔄 Forced Deal");const vt=others.filter(p=>Object.entries(p.properties).some(([c,a])=>a.length>0&&a.length<PC[c].needed));if(!vt.length)W("No swappable!");vt.forEach(p=>{B(p.name,"accent",()=>{modalStep.targetId=p.id;renderModal();});});B("Cancel","ghost",closeModal);}
+    else if(modalStep.theirColor===undefined){const tgt=G.players[modalStep.targetId];const st=Object.entries(tgt.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);T("Their property");if(!st.length)W("No incomplete sets!");st.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.theirColor=c;renderModal();});});B("Back","ghost",()=>{modalStep.targetId=undefined;renderModal();});B("Cancel","ghost",closeModal);}
+    else if(modalStep.theirPropIdx===undefined){T("Pick their card");(G.players[modalStep.targetId].properties[modalStep.theirColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>{modalStep.theirPropIdx=i;renderModal();});});B("Back","ghost",()=>{modalStep.theirColor=undefined;renderModal();});B("Cancel","ghost",closeModal);}
+    else if(modalStep.myColor===undefined){const sw=Object.entries(me.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);T("Your property to give");if(!sw.length)W("No incomplete sets!");sw.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.myColor=c;renderModal();});});B("Back","ghost",()=>{modalStep.theirPropIdx=undefined;renderModal();});B("Cancel","ghost",closeModal);}
+    else{T("Pick your card");(me.properties[modalStep.myColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Forced Deal",()=>resolveM("forcedDeal",i)));});B("Back","ghost",()=>{modalStep.myColor=undefined;renderModal();});B("Cancel","ghost",closeModal);}
   }
   else if(m.type==="improvement"){
     const valid=Object.entries(me.properties).filter(([c,a])=>a.length>=PC[c].needed).filter(([c])=>{const im=me.improvements[c]||{};return m.improvType==="house"?!im.house:im.house&&!im.hotel;});
-    T(m.improvType==="house"?"🏠 Add House":"🏨 Add Hotel");
-    if(!valid.length)W("No valid sets!"+(m.improvType==="hotel"?" (Need a house first)":""));
-    valid.forEach(([c])=>{const p=PC[c];CB(p.label,p.bg,p.fg,()=>resolveM("improvement",c));});
-    B("Cancel","ghost",closeModal);
+    T(m.improvType==="house"?"🏠 Add House":"🏨 Add Hotel");if(!valid.length)W("No valid sets!");
+    valid.forEach(([c])=>{const p=PC[c];CB(p.label,p.bg,p.fg,()=>resolveM("improvement",c));});B("Cancel","ghost",closeModal);
   }
   else if(m.type==="discard"){
-    if(!modalStep.sel)modalStep.sel=[];
-    const needed=m.excess;
-    T("Discard "+needed+" Card"+(needed>1?"s":""));S("You have "+me.hand.length+" cards (max 7). Select "+needed+" to discard.");
+    if(!modalStep.sel)modalStep.sel=[];const needed=m.excess;
+    T("Discard "+needed+" Card"+(needed>1?"s":""));S("You have "+me.hand.length+" cards (max 7). Select "+needed+".");
     const grid=document.createElement("div");grid.className="discard-grid";bx.appendChild(grid);
-    me.hand.forEach((c,i)=>{const w=document.createElement("div");w.innerHTML=cardHTML(c,"md",modalStep.sel.includes(i));w.onclick=()=>{
-      const s=modalStep.sel;if(s.includes(i))modalStep.sel=s.filter(x=>x!==i);else if(s.length<needed)modalStep.sel=[...s,i];renderModal();
-    };grid.appendChild(w);});
+    me.hand.forEach((c,i)=>{
+      const w=document.createElement("div");
+      w.innerHTML=`<div class="hand-card nb-card flex flex-col p-2${modalStep.sel.includes(i)?" selected":""}" style="min-width:80px;height:120px;margin-right:0">${handCardInner(c)}</div>`;
+      w.onclick=()=>{const s=modalStep.sel;if(s.includes(i))modalStep.sel=s.filter(x=>x!==i);else if(s.length<needed)modalStep.sel=[...s,i];renderModal();};
+      grid.appendChild(w);
+    });
     const sel=modalStep.sel;
-    const cb=document.createElement("button");cb.className="modal-btn "+(sel.length===needed?"accent":"ghost");cb.style.opacity=sel.length===needed?"1":".5";
+    const cb=document.createElement("button");cb.className="modal-btn "+(sel.length===needed?"accent":"ghost");cb.style.opacity=sel.length===needed?1:.5;
     cb.textContent="Discard ("+sel.length+"/"+needed+")";cb.onclick=()=>{if(sel.length===needed)resolveM("discard");};bx.appendChild(cb);
   }
 }
 
 function resolveM(action,arg1,arg2){
-  const m=currentModal;if(!m)return;
-  const me=G.players[myPlayerIdx];
-  if(action==="birthday"){
-    G=clone(G);const p=G.players[myPlayerIdx];
-    G.players.forEach((t,ti)=>{if(ti!==myPlayerIdx)payPlayer(t,p,2);});
-    p.hand.splice(m.cardIdx,1);G.actionsLeft--;
-    addLog(G,p.name+" played Birthday! Collected $2M from all.",myPlayerIdx);
-    selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
-  }
-  else if(action==="debtCollector"){
-    G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[arg1];
-    const paid=payPlayer(t,p,5);p.hand.splice(m.cardIdx,1);G.actionsLeft--;
-    addLog(G,p.name+" used Debt Collector on "+t.name+"! Got $"+paid+"M.",myPlayerIdx);
-    selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
-  }
-  else if(action==="rentAll"){
-    const color=modalStep.color;G=clone(G);const p=G.players[myPlayerIdx];const rent=getRent(p,color);
-    G.players.forEach((t,ti)=>{if(ti!==myPlayerIdx)payPlayer(t,p,rent);});
-    p.hand.splice(m.cardIdx,1);G.actionsLeft--;
-    addLog(G,p.name+" charged $"+rent+"M rent ("+PC[color].label+") to everyone!",myPlayerIdx);
-    selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
-  }
-  else if(action==="rentOne"){
-    const color=modalStep.color;G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[arg1];const rent=getRent(p,color);
-    const paid=payPlayer(t,p,rent);p.hand.splice(m.cardIdx,1);G.actionsLeft--;
-    addLog(G,p.name+" charged "+t.name+" $"+rent+"M ("+PC[color].label+"). Paid $"+paid+"M.",myPlayerIdx);
-    selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
-  }
-  else if(action==="slyDeal"){
-    G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[modalStep.targetId];const color=modalStep.color;
-    const[stolen]=t.properties[color].splice(arg1,1);if(!p.properties[color])p.properties[color]=[];p.properties[color].push(stolen);
-    p.hand.splice(m.cardIdx,1);G.actionsLeft--;
-    addLog(G,p.name+" Sly Dealt "+stolen.name+" from "+t.name+"!",myPlayerIdx);
-    selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
-  }
-  else if(action==="dealBreaker"){
-    G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[arg1];const color=arg2;
-    p.properties[color]=[...(p.properties[color]||[]),...(t.properties[color]||[])];t.properties[color]=[];
-    p.hand.splice(m.cardIdx,1);G.actionsLeft--;
-    addLog(G,p.name+" Deal Broke "+PC[color].label+" from "+t.name+"!",myPlayerIdx);
-    selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
-  }
-  else if(action==="improvement"){
-    G=clone(G);const p=G.players[myPlayerIdx];const color=arg1;
-    if(!p.improvements[color])p.improvements[color]={};
-    if(m.improvType==="house")p.improvements[color].house=true;else p.improvements[color].hotel=true;
-    p.hand.splice(m.cardIdx,1);G.actionsLeft--;
-    addLog(G,p.name+" added "+m.improvType+" to "+PC[color].label+".",myPlayerIdx);
-    selectedCards=[];bcastGame();closeModal();
-  }
-  else if(action==="forcedDeal"){
-    G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[modalStep.targetId];
-    const[theirCard]=t.properties[modalStep.theirColor].splice(modalStep.theirPropIdx,1);
-    if(!p.properties[modalStep.theirColor])p.properties[modalStep.theirColor]=[];p.properties[modalStep.theirColor].push(theirCard);
-    const[myCard]=p.properties[modalStep.myColor].splice(arg1,1);
-    if(!t.properties[modalStep.myColor])t.properties[modalStep.myColor]=[];t.properties[modalStep.myColor].push(myCard);
-    p.hand.splice(m.cardIdx,1);G.actionsLeft--;
-    addLog(G,p.name+" Forced Deal: swapped "+myCard.name+" for "+theirCard.name+" with "+t.name+"!",myPlayerIdx);
-    selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
-  }
-  else if(action==="discard"){
-    const sel=modalStep.sel||[];if(sel.length!==m.excess)return;
-    G=clone(G);const p=G.players[myPlayerIdx];
-    sel.sort((a,b)=>b-a).forEach(i=>{const[c]=p.hand.splice(i,1);G.discard.push(c);});
-    addLog(G,p.name+" discarded "+sel.length+" card(s).",myPlayerIdx);
-    bcastGame();closeModal();advanceTurn();
-  }
+  const m=currentModal;if(!m)return;const me=G.players[myPlayerIdx];
+  if(action==="birthday"){G=clone(G);const p=G.players[myPlayerIdx];G.players.forEach((t,ti)=>{if(ti!==myPlayerIdx)payPlayer(t,p,2);});p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" played Birthday! Collected $2M from all.",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();}
+  else if(action==="debtCollector"){G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[arg1];const paid=payPlayer(t,p,5);p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" used Debt Collector on "+t.name+"! Got $"+paid+"M.",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();}
+  else if(action==="rentAll"){const color=modalStep.color;G=clone(G);const p=G.players[myPlayerIdx];const rent=getRent(p,color);G.players.forEach((t,ti)=>{if(ti!==myPlayerIdx)payPlayer(t,p,rent);});p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" charged $"+rent+"M ("+PC[color].label+") to everyone!",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();}
+  else if(action==="rentOne"){const color=modalStep.color;G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[arg1];const rent=getRent(p,color);const paid=payPlayer(t,p,rent);p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" charged "+t.name+" $"+rent+"M ("+PC[color].label+"). Paid $"+paid+"M.",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();}
+  else if(action==="slyDeal"){G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[modalStep.targetId];const color=modalStep.color;const[stolen]=t.properties[color].splice(arg1,1);if(!p.properties[color])p.properties[color]=[];p.properties[color].push(stolen);p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" Sly Dealt "+stolen.name+" from "+t.name+"!",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();}
+  else if(action==="dealBreaker"){G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[arg1];const color=arg2;p.properties[color]=[...(p.properties[color]||[]),...(t.properties[color]||[])];t.properties[color]=[];p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" Deal Broke "+PC[color].label+" from "+t.name+"!",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();}
+  else if(action==="improvement"){G=clone(G);const p=G.players[myPlayerIdx];const color=arg1;if(!p.improvements[color])p.improvements[color]={};if(m.improvType==="house")p.improvements[color].house=true;else p.improvements[color].hotel=true;p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" added "+m.improvType+" to "+PC[color].label+".",myPlayerIdx);selectedCards=[];bcastGame();closeModal();}
+  else if(action==="forcedDeal"){G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[modalStep.targetId];const[theirCard]=t.properties[modalStep.theirColor].splice(modalStep.theirPropIdx,1);if(!p.properties[modalStep.theirColor])p.properties[modalStep.theirColor]=[];p.properties[modalStep.theirColor].push(theirCard);const[myCard]=p.properties[modalStep.myColor].splice(arg1,1);if(!t.properties[modalStep.myColor])t.properties[modalStep.myColor]=[];t.properties[modalStep.myColor].push(myCard);p.hand.splice(m.cardIdx,1);G.actionsLeft--;addLog(G,p.name+" Forced Deal: swapped "+myCard.name+" for "+theirCard.name+" with "+t.name+"!",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();}
+  else if(action==="discard"){const sel=modalStep.sel||[];if(sel.length!==m.excess)return;G=clone(G);const p=G.players[myPlayerIdx];sel.sort((a,b)=>b-a).forEach(i=>{const[c]=p.hand.splice(i,1);G.discard.push(c);});addLog(G,p.name+" discarded "+sel.length+" card(s).",myPlayerIdx);bcastGame();closeModal();advanceTurn();}
 }
 
 function showWinner(name){document.getElementById("winnerName").textContent=name;document.getElementById("winnerScreen").style.display="flex";}
-function showToast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.opacity=1;setTimeout(()=>{t.style.opacity=0;},2800);}
+function showToast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.opacity=1;setTimeout(()=>t.style.opacity=0,2800);}
 </script>
 </body>
 </html>
