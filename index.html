@@ -538,61 +538,85 @@ async function joinRoom(){
   roomCode=code;
   isHost=false;
   setLobbyStatus("Joining room…");
-  // Show waiting room FIRST, then subscribe
   showWaitingRoom();
   await subscribeRoom();
-  // Small delay to ensure channel is truly ready before announcing
-  await new Promise(res=>setTimeout(res,300));
-  await channel.send({type:"broadcast",event:"join",payload:{name:myName}});
+  // Retry ping: keep sending join every 1.5s until host replies with room_state
+  startJoinPing();
+}
+
+let _joinPingTimer=null;
+let _joinConfirmed=false;
+
+function startJoinPing(){
+  _joinConfirmed=false;
+  _joinPingTimer=setInterval(async()=>{
+    if(_joinConfirmed){ clearInterval(_joinPingTimer); return; }
+    await channel.send({type:"broadcast",event:"join",payload:{name:myName}});
+  },1500);
+  // Send first ping immediately
+  channel.send({type:"broadcast",event:"join",payload:{name:myName}});
 }
 
 async function subscribeRoom(){
   channel = sbClient.channel(`md-room-${roomCode}`, {
     config:{ broadcast:{ self:false } }
   });
+
   channel.on("broadcast",{event:"join"},({payload})=>{
-    // Host receives join from others, assigns idx and broadcasts updated room state
+    // Host receives join ping from joiner
     if(isHost){
       const existing=roomPlayers.find(p=>p.name===payload.name);
       if(!existing){
-        const idx=roomPlayers.length;
-        roomPlayers.push({name:payload.name,idx});
+        roomPlayers.push({name:payload.name, idx:roomPlayers.length});
       }
+      // Always re-broadcast room state so joiner gets it
       broadcastRoomState();
     }
   });
+
   channel.on("broadcast",{event:"room_state"},({payload})=>{
     roomPlayers=payload.players;
     if(!isHost){
       const me=roomPlayers.find(p=>p.name===myName);
-      if(me) myPlayerIdx=me.idx;
+      if(me){
+        myPlayerIdx=me.idx;
+        // Confirmed — stop pinging
+        _joinConfirmed=true;
+        clearInterval(_joinPingTimer);
+      }
     }
     renderWaitingRoom();
   });
+
   channel.on("broadcast",{event:"game_start"},({payload})=>{
+    _joinConfirmed=true;
+    clearInterval(_joinPingTimer);
     G=payload.game;
     showGame();
   });
+
   channel.on("broadcast",{event:"game_update"},({payload})=>{
     G=payload.game;
     renderGame();
     if(G.winner){ showWinner(G.winner); }
   });
+
   await new Promise(res=>{
     channel.subscribe(status=>{
       if(status==="SUBSCRIBED") res();
     });
   });
+
   // Host broadcasts initial room state after subscribing
   if(isHost){
-    await new Promise(res=>setTimeout(res,200));
+    await new Promise(res=>setTimeout(res,300));
     await broadcastRoomState();
   }
 }
 
 async function broadcastRoomState(){
   await channel.send({type:"broadcast",event:"room_state",payload:{players:roomPlayers}});
-  renderWaitingRoom(); // always re-render locally too
+  renderWaitingRoom(); // update host UI locally too
 }
 
 function showWaitingRoom(){
