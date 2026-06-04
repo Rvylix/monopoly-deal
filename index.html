@@ -257,6 +257,10 @@ body{background-color:#007456;background-image:repeating-linear-gradient(45deg,r
       <div style="font-size:10px;font-weight:800;color:#888;margin-bottom:4px">ROOM CODE</div>
       <div id="settingsCode" style="font-size:28px;font-weight:900;letter-spacing:8px;color:#6a5f00"></div>
     </div>
+    <!-- Save log -->
+    <button onclick="saveLog()" class="nb-btn" style="width:100%;padding:12px;background:#59ffc9;color:#000;font-size:14px;font-weight:900;justify-content:center;margin-bottom:10px">
+      <span class="material-symbols-outlined">download</span> SAVE GAME LOG
+    </button>
     <!-- Exit game -->
     <button onclick="confirmExit()" class="nb-btn" style="width:100%;padding:14px;background:#F44336;color:white;font-size:15px;font-weight:900;justify-content:center">
       <span class="material-symbols-outlined">exit_to_app</span> EXIT GAME
@@ -325,11 +329,11 @@ function buildDeck(){
     ["railroad","Reading RR",2],["railroad","Pennsylvania RR",2],["railroad","B&O RR",2],["railroad","Short Line RR",2],
     ["utility","Electric Co.",2],["utility","Water Works",2],
   ].forEach(([color,name,value])=>c.push(mk("property",{color,name,value})));
-  // Wild cards — 4 total
-  c.push(mk("wild",{label:"Wild",sub:"Any Color",value:0,colors:Object.keys(PC)}));
-  c.push(mk("wild",{label:"Wild",sub:"Any Color",value:0,colors:Object.keys(PC)}));
-  c.push(mk("wild",{label:"Wild",sub:"RR + Utility",value:0,colors:["railroad","utility"]}));
-  c.push(mk("wild",{label:"Wild",sub:"Green + Dk.Blue",value:0,colors:["green","darkblue"]}));
+  // Wild cards — 4 total (labeled clearly as Wild Property)
+  c.push(mk("wild",{label:"Wild Property",sub:"Any Color",value:0,colors:Object.keys(PC)}));
+  c.push(mk("wild",{label:"Wild Property",sub:"Any Color",value:0,colors:Object.keys(PC)}));
+  c.push(mk("wild",{label:"Wild Property",sub:"RR + Utility",value:0,colors:["railroad","utility"]}));
+  c.push(mk("wild",{label:"Wild Property",sub:"Green + Dk.Blue",value:0,colors:["green","darkblue"]}));
   // Action cards — exact counts from original (32 action cards)
   [
     {name:"Pass Go",      icon:"bolt",    desc:"Draw 2 extra cards",         lbl:"Play Event",   hdrBg:"#ffe600",hdrFg:"#000",count:10,value:1},
@@ -446,14 +450,25 @@ async function subscribeRoom(){
     if(msg.data.attackerIdx!==myPlayerIdx)return;
     document.getElementById("jsnContainer").innerHTML="";
     if(msg.data.used){
-      G=clone(G);const t=G.players[msg.data.targetIdx];
-      const idx=t.hand.findIndex(c=>c.name==="Just Say No");
-      if(idx>=0){const[j]=t.hand.splice(idx,1);G.discard.push(j);}
-      addLog(G,t.name+" used Just Say No!",msg.data.targetIdx);
-      // Execute pending action but EXCLUDE the JSN player
-      if(_pendingJSN){_pendingJSN(msg.data.targetIdx);_pendingJSN=null;}
-      else{bcastGame();closeModal();}
+      G=clone(G);
+      // 1. Discard the JSN card from target's hand
+      const t=G.players[msg.data.targetIdx];
+      const jsnIdx=t.hand.findIndex(c=>c.name==="Just Say No");
+      if(jsnIdx>=0){const[j]=t.hand.splice(jsnIdx,1);G.discard.push(j);}
+      // 2. Discard the attacker's action card that triggered JSN
+      const attacker=G.players[myPlayerIdx];
+      if(msg.data.cardIdx!==undefined&&msg.data.cardIdx>=0){
+        const aidx=attacker.hand.findIndex((c,i)=>i===msg.data.cardIdx);
+        if(aidx>=0){const[ac]=attacker.hand.splice(aidx,1);G.discard.push(ac);}
+        // Still costs an action
+        G.actionsLeft=Math.max(0,G.actionsLeft-1);
+      }
+      addLog(G,t.name+" used Just Say No! Action cancelled and discarded.",msg.data.targetIdx);
+      _pendingJSN=null;
+      selectedCards=[];
+      bcastGame();closeModal();
     }else{
+      // Allowed — execute the pending action
       if(_pendingJSN){_pendingJSN(null);_pendingJSN=null;}
     }
   });
@@ -563,27 +578,22 @@ function buildOppBlock(p){
   wrap.appendChild(badge);
   // Content row: bank stack + prop stacks
   const row=document.createElement("div");row.style.cssText="display:flex;gap:12px;align-items:flex-end";
-  // Bank money stacks — group by value, stack same denomination
+  // Bank money — one unified stack, sorted by value ascending
   if(p.bank.length>0){
-    const grouped={};p.bank.forEach(c=>{if(!grouped[c.value])grouped[c.value]=[];grouped[c.value].push(c);});
-    const bankDiv=document.createElement("div");bankDiv.style.cssText="display:flex;flex-direction:column;gap:2px";
+    const bankDiv=document.createElement("div");bankDiv.style.cssText="display:flex;flex-direction:column;align-items:center;gap:2px";
     const bankLbl=document.createElement("div");bankLbl.style.cssText="font-size:8px;font-weight:800;font-family:Montserrat,sans-serif;margin-bottom:4px";bankLbl.textContent="BANK $"+bankTotal(p)+"M";bankDiv.appendChild(bankLbl);
-    const stacksRow=document.createElement("div");stacksRow.style.cssText="display:flex;gap:6px;align-items:flex-end";
-    Object.entries(grouped).sort(([a],[b])=>Number(a)-Number(b)).forEach(([val,cards])=>{
-      const ms=MONEY_STYLE[Number(val)]||MONEY_STYLE[1];
-      // Stack same-value cards
-      const stackH=76+(cards.length-1)*8;
-      const sw=document.createElement("div");sw.style.cssText=`position:relative;width:76px;height:${stackH}px;flex-shrink:0`;
-      cards.forEach((c,ci)=>{
-        sw.innerHTML+=`<div class="ocard" style="position:absolute;left:0;top:${ci*8}px;z-index:${ci};background:${ms.bg}">
-          <div class="oc-top" style="background:${ms.bg};border-color:rgba(0,0,0,.2)"></div>
-          <div class="oc-mid"><span style="font-size:20px;font-weight:900;color:${ms.color}">$${val}M</span></div>
-          <div class="oc-bot" style="color:${ms.color}">MONEY</div>
-        </div>`;
-      });
-      stacksRow.appendChild(sw);
+    const sorted=[...p.bank].sort((a,b)=>a.value-b.value);
+    const stackH=76+(sorted.length-1)*8;
+    const sw=document.createElement("div");sw.style.cssText=`position:relative;width:76px;height:${stackH}px;flex-shrink:0`;
+    sorted.forEach((c,ci)=>{
+      const ms=MONEY_STYLE[c.value]||MONEY_STYLE[1];
+      sw.innerHTML+=`<div class="ocard" style="position:absolute;left:0;top:${ci*8}px;z-index:${ci};background:${ms.bg}">
+        <div class="oc-top" style="background:${ms.bg};border-color:rgba(0,0,0,.2)"></div>
+        <div class="oc-mid"><span style="font-size:18px;font-weight:900;color:${ms.color}">$${c.value}M</span></div>
+        <div class="oc-bot" style="color:${ms.color}">MONEY</div>
+      </div>`;
     });
-    bankDiv.appendChild(stacksRow);row.appendChild(bankDiv);
+    bankDiv.appendChild(sw);row.appendChild(bankDiv);
   }
   // Property stacks — each color group stacked
   const propsDiv=document.createElement("div");propsDiv.style.cssText="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap";
@@ -620,21 +630,24 @@ function renderMyTable(me,myTurn){
   const bc=document.getElementById("myBankCards");bc.innerHTML="";
   if(!me.bank.length){bc.innerHTML='<div style="font-size:11px;color:#aaa;padding:4px">Empty</div>';}
   else{
-    // Group bank by value, stack same denominations
-    const grouped={};me.bank.forEach(c=>{if(!grouped[c.value])grouped[c.value]=[];grouped[c.value].push(c);});
-    Object.entries(grouped).sort(([a],[b])=>Number(a)-Number(b)).forEach(([val,cards])=>{
-      const ms=MONEY_STYLE[Number(val)]||MONEY_STYLE[1];
-      const stackH=88+(cards.length-1)*8;
-      const sw=document.createElement("div");sw.style.cssText=`position:relative;width:60px;height:${stackH}px;flex-shrink:0`;
-      cards.forEach((c,ci)=>{
-        sw.innerHTML+=`<div class="mcard" style="position:absolute;left:0;top:${ci*8}px;z-index:${ci};background:${ms.bg}">
-          <div class="mc-top" style="background:${ms.bg};border-color:rgba(0,0,0,.2)"></div>
-          <div class="mc-mid"><span style="font-size:16px;font-weight:900;color:${ms.color}">$${val}M</span></div>
-          <div class="mc-bot" style="color:${ms.color}">MONEY</div>
-        </div>`;
-      });
-      bc.appendChild(sw);
+    // Stack ALL money cards in one pile sorted by value ascending (smallest on top)
+    const sorted=[...me.bank].sort((a,b)=>a.value-b.value);
+    const stackH=88+(sorted.length-1)*8;
+    const sw=document.createElement("div");sw.style.cssText=`position:relative;width:60px;height:${stackH}px;flex-shrink:0`;
+    sorted.forEach((c,ci)=>{
+      const ms=MONEY_STYLE[c.value]||MONEY_STYLE[1];
+      sw.innerHTML+=`<div class="mcard" style="position:absolute;left:0;top:${ci*8}px;z-index:${ci};background:${ms.bg}">
+        <div class="mc-top" style="background:${ms.bg};border-color:rgba(0,0,0,.2)"></div>
+        <div class="mc-mid"><span style="font-size:14px;font-weight:900;color:${ms.color}">$${c.value}M</span></div>
+        <div class="mc-bot" style="color:${ms.color}">MONEY</div>
+      </div>`;
     });
+    // Total label on top
+    const tot=document.createElement("div");tot.style.cssText="font-size:8px;font-weight:800;font-family:Montserrat,sans-serif;margin-top:4px;text-align:center";
+    tot.textContent="$"+bankTotal(me)+"M ("+sorted.length+" cards)";
+    const wrap=document.createElement("div");wrap.style.cssText="display:flex;flex-direction:column;align-items:center";
+    wrap.appendChild(sw);wrap.appendChild(tot);
+    bc.appendChild(wrap);
   }
   // Properties
   const pg=document.getElementById("myPropsGroups");pg.innerHTML="";
@@ -720,10 +733,23 @@ function renderLog(){
 function handleBankSelected(){
   if(!isMyTurn()||G.phase!=="play"||!selectedCards.length)return;
   G=clone(G);const p=G.players[myPlayerIdx];
-  const sorted=[...selectedCards].sort((a,b)=>b-a);const banked=[];
-  sorted.forEach(i=>{const c=p.hand[i];if(c.name==="Just Say No"){showToast("Just Say No cannot be banked!");return;}p.hand.splice(i,1);p.bank.push(c);banked.push("$"+c.value+"M");G.actionsLeft--;});
-  if(!banked.length){selectedCards=[];renderGame();return;}
-  addLog(G,p.name+" banked "+banked.join(", ")+".",myPlayerIdx);selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();
+  // Sort descending so splicing doesn't shift indices
+  const sorted=[...selectedCards].sort((a,b)=>b-a);
+  const toBank=[];
+  // First pass: validate all selected cards can be banked
+  for(const i of sorted){
+    const c=p.hand[i];
+    if(!c)continue;
+    if(c.name==="Just Say No"){showToast("Just Say No cannot be banked!");selectedCards=[];renderGame();return;}
+    toBank.push({i,c});
+  }
+  if(!toBank.length){selectedCards=[];renderGame();return;}
+  const banked=[];
+  for(const{i,c}of toBank){
+    p.hand.splice(i,1);p.bank.push(c);banked.push("$"+c.value+"M");G.actionsLeft--;
+  }
+  addLog(G,p.name+" banked "+banked.join(", ")+".",myPlayerIdx);
+  selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();
 }
 function handlePlaySelected(){
   if(!isMyTurn()||G.phase!=="play"||!selectedCards.length||G.actionsLeft===0)return;
@@ -734,9 +760,18 @@ function handlePlaySelected(){
   if(card.type==="action")handleAction(card,ci);
 }
 function playProp(ci,color){
-  G=clone(G);const p=G.players[myPlayerIdx];const[c]=p.hand.splice(ci,1);
-  if(!p.properties[color])p.properties[color]=[];if(c.type==="wild")c.chosenColor=color;
-  p.properties[color].push(c);G.actionsLeft--;addLog(G,p.name+" played "+c.name+" ("+PC[color].label+").",myPlayerIdx);
+  G=clone(G);const p=G.players[myPlayerIdx];
+  // Block adding to a complete set
+  const existing=p.properties[color]||[];
+  if(existing.length>=PC[color].needed){
+    showToast(PC[color].label+" set is already complete! Pick a different color.");
+    selectedCards=[];renderGame();closeModal();return;
+  }
+  const[c]=p.hand.splice(ci,1);
+  if(!p.properties[color])p.properties[color]=[];
+  if(c.type==="wild")c.chosenColor=color;
+  p.properties[color].push(c);G.actionsLeft--;
+  addLog(G,p.name+" played "+(c.name||c.label)+" ("+PC[color].label+").",myPlayerIdx);
   selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
 }
 function handleAction(card,ci){
@@ -762,10 +797,9 @@ function advanceTurn(){
 
 // ── JSN — targetPlayerIdx=null means "skip that player" (they used JSN) ──
 // _pendingJSN is now called with (skipPlayerIdx) where null means no skip
-function checkJSN(targetPlayerIdx,actionLabel,onConfirm){
+function checkJSN(targetPlayerIdx,actionLabel,cardIdx,onConfirm){
   const target=G.players[targetPlayerIdx];
   if(!target.hand.some(c=>c.name==="Just Say No")){
-    // No JSN — just execute immediately
     onConfirm(null);return;
   }
   _pendingJSN=onConfirm;
@@ -773,9 +807,10 @@ function checkJSN(targetPlayerIdx,actionLabel,onConfirm){
   const ov=document.createElement("div");ov.className="jsn-overlay";
   const bx=document.createElement("div");bx.className="jsn-box";
   bx.innerHTML=`<h2 style="font-size:19px;font-weight:900;margin-bottom:8px">⏳ Waiting...</h2><p style="font-size:12px;color:#bbb;margin-bottom:18px">Asking <strong>${target.name}</strong> if they want to use<br><strong>Just Say No</strong> against:<br><em>${actionLabel}</em></p>`;
-  const cb=document.createElement("button");cb.className="modal-btn ghost";cb.textContent="Cancel";cb.onclick=()=>{_pendingJSN=null;jsnC.innerHTML="";closeModal();};
+  const cb=document.createElement("button");cb.className="modal-btn ghost";cb.textContent="Cancel";
+  cb.onclick=()=>{_pendingJSN=null;jsnC.innerHTML="";closeModal();};
   bx.appendChild(cb);ov.appendChild(bx);jsnC.appendChild(ov);
-  channel.publish("jsn_prompt",{targetIdx:targetPlayerIdx,attackerIdx:myPlayerIdx,actionLabel,pendingAction:actionLabel});
+  channel.publish("jsn_prompt",{targetIdx:targetPlayerIdx,attackerIdx:myPlayerIdx,actionLabel,cardIdx});
 }
 function showJSNPrompt(actionLabel,attackerIdx){
   jsnBeep();const attacker=G.players[attackerIdx];
@@ -807,9 +842,22 @@ function renderModal(){
   function CB(lbl,bg,fg,fn){const b=document.createElement("button");b.className="color-btn";b.style.cssText="background:"+bg+";color:"+fg;b.textContent=lbl;b.onclick=fn;bx.appendChild(b);}
   function W(t){const d=document.createElement("div");d.className="warn-txt";d.textContent=t;bx.appendChild(d);}
 
-  if(m.type==="pickWild"){T("Pick Color for Wild Card");S("Which color group?");m.colors.forEach(c=>{const p=PC[c];if(p)CB(p.label,p.bg,p.fg,()=>playProp(m.cardIdx,c));});B("Cancel","ghost",closeModal);}
+  if(m.type==="pickWild"){
+    T("Pick Color for Wild Card");S("Which color group? (Complete sets are greyed out)");
+    m.colors.forEach(c=>{
+      const p=PC[c];if(!p)return;
+      const existing=(me.properties[c]||[]).length;
+      const isFull=existing>=p.needed;
+      const b=document.createElement("button");b.className="color-btn";
+      b.style.cssText="background:"+p.bg+";color:"+p.fg+";opacity:"+(isFull?0.35:1)+";cursor:"+(isFull?"not-allowed":"pointer");
+      b.textContent=p.label+(isFull?" (FULL)":"")+" — "+existing+"/"+p.needed;
+      if(!isFull)b.onclick=()=>playProp(m.cardIdx,c);
+      bx.appendChild(b);
+    });
+    B("Cancel","ghost",closeModal);
+  }
   else if(m.type==="birthday"){T("🎂 It's My Birthday!");S("Collect $2M from each player.");B("Collect!","accent",()=>resolveM("birthday"));B("Cancel","ghost",closeModal);}
-  else if(m.type==="debtCollector"){T("💸 Debt Collector");S("Collect $5M from:");others.forEach(p=>{B(p.name+" (bank $"+bankTotal(p)+"M)","accent",()=>checkJSN(p.id,"Debt Collector $5M",()=>resolveM("debtCollector",p.id)));});B("Cancel","ghost",closeModal);}
+  else if(m.type==="debtCollector"){T("💸 Debt Collector");S("Collect $5M from:");others.forEach(p=>{B(p.name+" (bank $"+bankTotal(p)+"M)","accent",()=>checkJSN(p.id,"Debt Collector $5M",m.cardIdx,()=>resolveM("debtCollector",p.id)));});B("Cancel","ghost",closeModal);}
   else if(m.type==="rent"){
     const avail=(m.rentColors||[]).filter(c=>(me.properties[c]||[]).length>0);
     if(!modalStep.color){T("🏠 Charge Rent");S("Pick color:");if(!avail.length)W("No matching properties!");avail.forEach(c=>{const p=PC[c];CB(p.label+" — $"+getRent(me,c)+"M ("+((me.properties[c]||[]).length)+"/"+p.needed+")",p.bg,p.fg,()=>{modalStep.color=c;renderModal();});});B("Cancel","ghost",closeModal);}
@@ -821,7 +869,7 @@ function renderModal(){
         B("Charge Everyone!","accent",()=>resolveRentAll(m,color,rent));B("Cancel","ghost",closeModal);
       }else{
         T("Pick player");S("$"+rent+"M for "+PC[color].label+":");
-        others.forEach(p=>{B(p.name+" (bank $"+bankTotal(p)+"M)","accent",()=>checkJSN(p.id,"Rent $"+rent+"M on "+PC[color].label,skip=>resolveM("rentOne",p.id,null,skip)));});B("Cancel","ghost",closeModal);
+        others.forEach(p=>{B(p.name+" (bank $"+bankTotal(p)+"M)","accent",()=>checkJSN(p.id,"Rent $"+rent+"M on "+PC[color].label,m.cardIdx,skip=>resolveM("rentOne",p.id,null,skip)));});B("Cancel","ghost",closeModal);
       }
     }
   }
@@ -829,20 +877,20 @@ function renderModal(){
     if(modalStep.targetId===undefined){T("🦊 Sly Deal");others.forEach(p=>{B(p.name,"accent",()=>{modalStep.targetId=p.id;renderModal();});});B("Cancel","ghost",closeModal);}
     else{const tgt=G.players[modalStep.targetId];const stealable=Object.entries(tgt.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);
       if(!modalStep.color){T("Pick their color");if(!stealable.length)W("No incomplete sets!");stealable.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.color=c;renderModal();});});B("Back","ghost",()=>{modalStep.targetId=undefined;renderModal();});B("Cancel","ghost",closeModal);}
-      else{T("Pick their card");(tgt.properties[modalStep.color]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Sly Deal",skip=>{ if(skip!==null)closeModal(); else resolveM("slyDeal",i); }));});B("Back","ghost",()=>{modalStep.color=undefined;renderModal();});B("Cancel","ghost",closeModal);}
+      else{T("Pick their card");(tgt.properties[modalStep.color]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Sly Deal",m.cardIdx,skip=>{ if(skip!==null)closeModal(); else resolveM("slyDeal",i); }));});B("Back","ghost",()=>{modalStep.color=undefined;renderModal();});B("Cancel","ghost",closeModal);}
     }
   }
   else if(m.type==="dealBreaker"){
     const sets=[];G.players.forEach((p,pi)=>{if(pi===myPlayerIdx)return;Object.entries(p.properties).forEach(([c,a])=>{if(a.length>=PC[c].needed)sets.push({player:p,playerIdx:pi,color:c});});});
     T("💥 Deal Breaker");if(!sets.length)W("No complete sets!");
-    sets.forEach(({player,playerIdx,color})=>{const p=PC[color];CB(player.name+"'s "+p.label,p.bg,p.fg,()=>checkJSN(playerIdx,"Deal Breaker",skip=>{if(skip!==null)closeModal();else resolveM("dealBreaker",playerIdx,color);}));});B("Cancel","ghost",closeModal);
+    sets.forEach(({player,playerIdx,color})=>{const p=PC[color];CB(player.name+"'s "+p.label,p.bg,p.fg,()=>checkJSN(playerIdx,"Deal Breaker",m.cardIdx,skip=>{if(skip!==null)closeModal();else resolveM("dealBreaker",playerIdx,color);}));});B("Cancel","ghost",closeModal);
   }
   else if(m.type==="forcedDeal"){
     if(modalStep.targetId===undefined){T("🔄 Forced Deal");const vt=others.filter(p=>Object.entries(p.properties).some(([c,a])=>a.length>0&&a.length<PC[c].needed));if(!vt.length)W("No swappable!");vt.forEach(p=>{B(p.name,"accent",()=>{modalStep.targetId=p.id;renderModal();});});B("Cancel","ghost",closeModal);}
     else if(modalStep.theirColor===undefined){const tgt=G.players[modalStep.targetId];const st=Object.entries(tgt.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);T("Their property");if(!st.length)W("No incomplete sets!");st.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.theirColor=c;renderModal();});});B("Back","ghost",()=>{modalStep.targetId=undefined;renderModal();});B("Cancel","ghost",closeModal);}
     else if(modalStep.theirPropIdx===undefined){T("Pick their card");(G.players[modalStep.targetId].properties[modalStep.theirColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>{modalStep.theirPropIdx=i;renderModal();});});B("Back","ghost",()=>{modalStep.theirColor=undefined;renderModal();});B("Cancel","ghost",closeModal);}
     else if(modalStep.myColor===undefined){const sw=Object.entries(me.properties).filter(([c,a])=>a.length>0&&a.length<PC[c].needed);T("Your property to give");if(!sw.length)W("No incomplete sets!");sw.forEach(([c,a])=>{const p=PC[c];CB(p.label+" ("+a.length+")",p.bg,p.fg,()=>{modalStep.myColor=c;renderModal();});});B("Back","ghost",()=>{modalStep.theirPropIdx=undefined;renderModal();});B("Cancel","ghost",closeModal);}
-    else{T("Pick your card");(me.properties[modalStep.myColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Forced Deal",skip=>{if(skip!==null)closeModal();else resolveM("forcedDeal",i);}));});B("Back","ghost",()=>{modalStep.myColor=undefined;renderModal();});B("Cancel","ghost",closeModal);}
+    else{T("Pick your card");(me.properties[modalStep.myColor]||[]).forEach((c,i)=>{B(c.name||c.label,"ghost",()=>checkJSN(modalStep.targetId,"Forced Deal",m.cardIdx,skip=>{if(skip!==null)closeModal();else resolveM("forcedDeal",i);}));});B("Back","ghost",()=>{modalStep.myColor=undefined;renderModal();});B("Cancel","ghost",closeModal);}
   }
   else if(m.type==="improvement"){
     const valid=Object.entries(me.properties).filter(([c,a])=>a.length>=PC[c].needed).filter(([c])=>{const im=me.improvements[c]||{};return m.improvType==="house"?!im.house:im.house&&!im.hotel;});
@@ -911,6 +959,29 @@ function resolveM(action,arg1,arg2,skipPlayerIdx=null){
   }
 }
 
+function saveLog(){
+  if(!G||!G.log||!G.log.length){showToast("No game log to save yet!");return;}
+  const lines=[];
+  lines.push("=== MONOPOLY DEAL — GAME LOG ===");
+  lines.push("Room: "+roomCode);
+  lines.push("Players: "+G.players.map(p=>p.name).join(", "));
+  lines.push("Date: "+new Date().toLocaleString());
+  lines.push("");
+  lines.push("--- LOG (newest first) ---");
+  [...G.log].forEach((entry)=>{
+    const who=entry.sys?"[System]":"["+(G.players[entry.pi||0]?.name||"?")+"]";
+    lines.push(who+" "+(entry.text||entry));
+  });
+  lines.push("");
+  lines.push("--- FINAL STANDINGS ---");
+  [...G.players].sort((a,b)=>setsCount(b)-setsCount(a)).forEach((p,i)=>{
+    lines.push((i+1)+". "+p.name+" — "+setsCount(p)+" set(s), Bank: $"+bankTotal(p)+"M");
+  });
+  const blob=new Blob([lines.join("\n")],{type:"text/plain"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="monopoly-deal-log-"+roomCode+".txt";a.click();
+  showToast("Game log saved!");
+}
 function showWinner(name){document.getElementById("winnerName").textContent=name;document.getElementById("winnerScreen").style.display="flex";}
 function showToast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.opacity=1;setTimeout(()=>t.style.opacity=0,2800);}
 </script>
