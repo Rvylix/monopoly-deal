@@ -525,8 +525,9 @@ async function createRoom(){
   roomPlayers=[{name:myName,idx:0}];
   myPlayerIdx=0;
   setLobbyStatus("Creating room…");
-  await subscribeRoom();
+  // Show waiting room FIRST, then subscribe
   showWaitingRoom();
+  await subscribeRoom();
 }
 
 async function joinRoom(){
@@ -537,25 +538,27 @@ async function joinRoom(){
   roomCode=code;
   isHost=false;
   setLobbyStatus("Joining room…");
-  await subscribeRoom();
-  // announce join
-  await channel.send({type:"broadcast",event:"join",payload:{name:myName}});
+  // Show waiting room FIRST, then subscribe
   showWaitingRoom();
+  await subscribeRoom();
+  // Small delay to ensure channel is truly ready before announcing
+  await new Promise(res=>setTimeout(res,300));
+  await channel.send({type:"broadcast",event:"join",payload:{name:myName}});
 }
 
 async function subscribeRoom(){
   channel = sbClient.channel(`md-room-${roomCode}`, {
-    config:{ broadcast:{self:true} }
+    config:{ broadcast:{ self:false } }
   });
   channel.on("broadcast",{event:"join"},({payload})=>{
-    // New player joined — host assigns idx
+    // Host receives join from others, assigns idx and broadcasts updated room state
     if(isHost){
       const existing=roomPlayers.find(p=>p.name===payload.name);
       if(!existing){
         const idx=roomPlayers.length;
         roomPlayers.push({name:payload.name,idx});
-        broadcastRoomState();
       }
+      broadcastRoomState();
     }
   });
   channel.on("broadcast",{event:"room_state"},({payload})=>{
@@ -575,15 +578,21 @@ async function subscribeRoom(){
     renderGame();
     if(G.winner){ showWinner(G.winner); }
   });
-  await new Promise(res=>{ channel.subscribe(status=>{ if(status==="SUBSCRIBED") res(); }); });
+  await new Promise(res=>{
+    channel.subscribe(status=>{
+      if(status==="SUBSCRIBED") res();
+    });
+  });
+  // Host broadcasts initial room state after subscribing
   if(isHost){
+    await new Promise(res=>setTimeout(res,200));
     await broadcastRoomState();
   }
 }
 
 async function broadcastRoomState(){
   await channel.send({type:"broadcast",event:"room_state",payload:{players:roomPlayers}});
-  renderWaitingRoom();
+  renderWaitingRoom(); // always re-render locally too
 }
 
 function showWaitingRoom(){
