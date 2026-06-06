@@ -383,80 +383,127 @@ function addLog(g,text,pi,sys=false){g.log=[{text,pi,sys},...(g.log||[]).slice(0
 // ─────────────────────────────────────────────────────────────────────────────
 // payPlayer — THE SINGLE SOURCE OF TRUTH for all money/property transfers.
 //
-// Rules enforced:
-//   1. Bank: find the fewest cards that cover the debt. Prefer a single card
-//      that covers the owed amount over multiple smaller cards.
-//      Example: owed=$3M, bank=[$2M,$2M,$4M] → pays $4M only (not $2M+$2M).
-//   2. Properties (if bank short): same single-cover preference.
-//   3. No change given — creditor keeps any overpay.
-//   4. All mutations are atomic.
-//   5. owed<=0 is a no-op.
+// Smart payment algorithm:
+//   BANK: Find the combination of cards that covers the debt with the LEAST
+//   overpay. Among equally-good combos, prefer more smaller bills over one
+//   large bill (e.g. 3×$2M over $10M for a $5M debt).
+//   This mirrors real-world behaviour: people pay with smaller bills first
+//   and only use large bills when forced to.
 //
-// ALL rent, birthday, debt collector, and any future payment MUST use this.
+//   PROPERTIES: If bank can't cover the full debt, use the smallest single
+//   property that covers the remainder. If none, take cheapest in sequence.
+//
+//   No change is given — creditor keeps any overpay.
+//   All mutations are atomic to prevent cross-contamination.
+//   owed<=0 is a no-op.
+//
+// ALL payment actions MUST use payPlayer or payPlayerWithDigest.
 // ─────────────────────────────────────────────────────────────────────────────
+function bestBankPayment(bank, owed){
+  // Returns the subset of bank cards to give that covers `owed` with minimum
+  // overpay, preferring more cards (smaller denominations) over fewer (large).
+  // Uses dynamic-programming-style subset search (works for small hands ≤15 cards).
+  const n=bank.length;
+  let bestGive=null;
+  let bestOverpay=Infinity;
+  let bestCount=0; // prefer MORE cards (smaller denominations) among equal overpay
+
+  // Iterate all 2^n subsets (safe for n≤15, hands are max 7+)
+  for(let mask=1;mask<(1<<n);mask++){
+    let total=0;
+    const subset=[];
+    for(let i=0;i<n;i++){
+      if(mask&(1<<i)){subset.push(bank[i]);total+=bank[i].value;}
+    }
+    if(total<owed)continue; // doesn't cover
+    const overpay=total-owed;
+    // Prefer: less overpay first, then more cards (smaller bills) if equal overpay
+    if(overpay<bestOverpay||(overpay===bestOverpay&&subset.length>bestCount)){
+      bestOverpay=overpay;
+      bestCount=subset.length;
+      bestGive=subset;
+    }
+    if(bestOverpay===0&&bestCount===n)break; // exact match with all cards — can't do better
+  }
+  return bestGive; // null if bank can't cover
+}
+
 function payPlayer(debtor,creditor,owed){
   if(owed<=0)return 0;
   let paid=0;
 
-  // ── STEP 1: Pay from bank ────────────────────────────────────────────────
-  // Strategy: same as properties — prefer single card that covers debt first,
-  // then fall back to smallest-first multi-card.
-  const sortedBank=[...debtor.bank].sort((a,b)=>a.value-b.value);
+  // ── STEP 1: Pay from bank using optimal combination ──────────────────────
+  const bank=[...debtor.bank];
+  const bestGive=bestBankPayment(bank,owed);
 
-  // Check if a single bank card covers the full owed amount
-  const singleBankCover=sortedBank.find(c=>c.value>=owed);
-  if(singleBankCover){
-    // Pay with just this one card
-    debtor.bank=debtor.bank.filter(c=>c.id!==singleBankCover.id);
-    creditor.bank.push(singleBankCover);
-    return singleBankCover.value;
+  if(bestGive){
+    // Found a valid bank combination — commit atomically
+    const giveIds=new Set(bestGive.map(c=>c.id));
+    debtor.bank=debtor.bank.filter(c=>!giveIds.has(c.id));
+    bestGive.forEach(c=>creditor.bank.push(c));
+    return bestGive.reduce((s,c)=>s+c.value,0);
   }
 
-  // No single bank card covers it — pay smallest first until covered
-  const kept=[];
-  const give=[];
-  for(const c of sortedBank){
-    if(paid>=owed) kept.push(c);
-    else{give.push(c);paid+=c.value;}
-  }
-  // Commit atomically
-  debtor.bank=kept;
-  creditor.bank=[...creditor.bank,...give];
-  if(paid>=owed)return paid;
+  // Bank can't fully cover — pay everything in bank, then use properties
+  const giveAll=[...debtor.bank];
+  debtor.bank=[];
+  giveAll.forEach(c=>creditor.bank.push(c));
+  paid=giveAll.reduce((s,c)=>s+c.value,0);
+  // paid < owed guaranteed here
 
-  // ── STEP 2: Still short — pay from properties ────────────────────────────
+  // ── STEP 2: Cover remainder with properties using optimal subset search ───
   const remaining=owed-paid;
   const allProps=[];
   Object.entries(debtor.properties).forEach(([color,cards])=>{
-    cards.forEach(c=>allProps.push({color,card:c}));
+    cards.forEach(c=>allProps.push({color,card:c,value:c.value}));
   });
-  allProps.sort((a,b)=>a.card.value-b.card.value);
 
-  // Prefer single property that covers the remaining debt
-  const singlePropCover=allProps.find(({card})=>card.value>=remaining);
-  if(singlePropCover){
-    const{color,card}=singlePropCover;
-    const arr=debtor.properties[color];
-    const pos=arr.findIndex(c=>c.id===card.id);
-    if(pos>=0){
-      arr.splice(pos,1);
-      if(!creditor.properties[color])creditor.properties[color]=[];
-      creditor.properties[color].push(card);
-      paid+=card.value;
+  if(!allProps.length)return paid;
+
+  // Run the same optimal subset search as bank payment:
+  // minimum overpay, preferring more cards (smaller values) among ties
+  const np=allProps.length;
+  let bestPropGive=null;
+  let bestPropOverpay=Infinity;
+  let bestPropCount=0;
+
+  for(let mask=1;mask<(1<<np);mask++){
+    const subset=[];let total=0;
+    for(let i=0;i<np;i++){
+      if(mask&(1<<i)){subset.push(allProps[i]);total+=allProps[i].value;}
     }
-    return paid;
+    const propTotal=paid+total;
+    if(propTotal<owed)continue; // doesn't cover the full debt
+    const overpay=propTotal-owed;
+    if(overpay<bestPropOverpay||(overpay===bestPropOverpay&&subset.length>bestPropCount)){
+      bestPropOverpay=overpay;
+      bestPropCount=subset.length;
+      bestPropGive=subset;
+    }
+    if(bestPropOverpay===0)break; // exact — can't do better
   }
 
-  // No single property covers it — take cheapest properties in sequence
-  for(const{color,card}of allProps){
-    if(paid>=owed)break;
-    const arr=debtor.properties[color];
-    const pos=arr.findIndex(c=>c.id===card.id);
-    if(pos===-1)continue;
-    arr.splice(pos,1);
-    if(!creditor.properties[color])creditor.properties[color]=[];
-    creditor.properties[color].push(card);
-    paid+=card.value;
+  if(bestPropGive){
+    // Remove chosen properties from debtor and give to creditor
+    const giveIds=new Set(bestPropGive.map(e=>e.card.id));
+    Object.keys(debtor.properties).forEach(color=>{
+      const arr=debtor.properties[color];
+      const toGive=arr.filter(c=>giveIds.has(c.id));
+      if(!toGive.length)return;
+      debtor.properties[color]=arr.filter(c=>!giveIds.has(c.id));
+      if(!creditor.properties[color])creditor.properties[color]=[];
+      creditor.properties[color].push(...toGive);
+      paid+=toGive.reduce((s,c)=>s+c.value,0);
+    });
+  }else{
+    // Props still can't cover (total assets < owed) — give everything
+    Object.entries(debtor.properties).forEach(([color,cards])=>{
+      if(!cards.length)return;
+      paid+=cards.reduce((s,c)=>s+c.value,0);
+      if(!creditor.properties[color])creditor.properties[color]=[];
+      creditor.properties[color].push(...cards);
+      debtor.properties[color]=[];
+    });
   }
   return paid;
 }
@@ -504,7 +551,7 @@ async function subscribeRoom(){
   channel.subscribe("room_state",msg=>{roomPlayers=msg.data.players;if(!isHost){const me=roomPlayers.find(p=>p.name===myName);if(me){myPlayerIdx=me.idx;_po=true;clearInterval(_pt);}}renderWaiting();});
   channel.subscribe("game_start",msg=>{_po=true;clearInterval(_pt);G=msg.data.game;showGame();if(myPlayerIdx===0)setTimeout(autoDraw,500);});
   channel.subscribe("game_update",msg=>{G=msg.data.game;renderGame();if(G.winner){showWinner(G.winner);return;}if(isMyTurn()){showTurnAlert();if(G.phase==="draw")setTimeout(autoDraw,600);}});
-  channel.subscribe("jsn_prompt",msg=>{if(msg.data.targetIdx!==myPlayerIdx)return;showJSNPrompt(msg.data.actionLabel,msg.data.attackerIdx,msg.data.pendingAction);});
+  channel.subscribe("jsn_prompt",msg=>{if(msg.data.targetIdx!==myPlayerIdx)return;showJSNPrompt(msg.data.actionLabel,msg.data.attackerIdx,msg.data.cardId);});
   channel.subscribe("jsn_response",msg=>{
     if(msg.data.attackerIdx!==myPlayerIdx)return;
     document.getElementById("jsnContainer").innerHTML="";
@@ -537,14 +584,18 @@ async function subscribeRoom(){
 
       G.actionsLeft=Math.max(0,G.actionsLeft-1);
       addLog(G,t.name+" used Just Say No! Both cards discarded.",msg.data.targetIdx);
+      const capturedTargetIdx=msg.data.targetIdx;
+      const capturedPendingJSN=_pendingJSN;
       _pendingJSN=null;
       _pendingJSNActionCard=null;
       currentModal=null;
       selectedCards=[];
       document.getElementById("modalContainer").innerHTML="";
       bcastGame();
+      // Continue chain if there is one (pass targetIdx so chain knows who used JSN)
+      if(capturedPendingJSN)capturedPendingJSN(capturedTargetIdx);
     }else{
-      // Allowed — execute the pending action
+      // Allowed — execute the pending action (pass null = no skip)
       _pendingJSNActionCard=null;
       if(_pendingJSN){_pendingJSN(null);_pendingJSN=null;}
     }
@@ -643,8 +694,7 @@ function renderGame(){
   bb.style.display=canBank?"inline-flex":"none";
   const badge=document.getElementById("actionsBadge");
   if(myTurn&&G.phase==="play"){badge.style.display="block";badge.textContent=G.actionsLeft+" ACTION"+(G.actionsLeft!==1?"S":"")+" LEFT";}
-  else badge.style.display="none";
-  const cnt=me.hand.length;
+  else badge.style.display="none";  const cnt=me.hand.length;
   ["handCnt","handCntBar"].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=cnt;});
   document.getElementById("handToggleLbl").innerHTML="YOUR HAND ("+cnt+") "+(handOpen?"▼":"▲");
 }
@@ -673,33 +723,32 @@ function renderOpps(){
 function buildOppBlock(p){
   const isT=G.currentPlayer===p._i;const col=PCOLORS[p._i%PCOLORS.length];
   const wrap=document.createElement("div");wrap.style.cssText="display:flex;flex-direction:column;align-items:center;gap:8px";
-  // Name badge
+  // Name badge — includes bank total and card count, NO bank stack shown
   const badge=document.createElement("div");
-  badge.style.cssText=`display:flex;align-items:center;gap:8px;background:white;border:4px solid black;padding:6px 14px;font-family:Montserrat,sans-serif;font-size:15px;font-weight:800;box-shadow:${isT?"0 0 0 4px #ffe600,4px 4px 0 4px #000":"4px 4px 0 0 #000"}`;
-  badge.innerHTML=`<div style="width:26px;height:26px;background:${col};border:2px solid black;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:900">${p.name[0].toUpperCase()}</div>
-    <span>${p.name}</span><span style="background:#ffe600;border:2px solid black;padding:1px 8px;font-size:11px">🃏 ${p.hand.length}</span>`;
+  const actionsInfo=isT&&G.phase==="play"?` <span style="background:#F44336;color:white;font-size:10px;padding:1px 6px;border:1px solid black;font-family:Montserrat,sans-serif">${G.actionsLeft}A</span>`:"";
+  badge.style.cssText=`display:flex;align-items:center;gap:6px;background:white;border:4px solid black;padding:6px 12px;font-family:Montserrat,sans-serif;font-size:14px;font-weight:800;box-shadow:${isT?"0 0 0 4px #ffe600,4px 4px 0 4px #000":"4px 4px 0 0 #000"}`;
+  // Bank total pill — hoverable to show breakdown
+  const bankPill=document.createElement("span");
+  bankPill.style.cssText="background:#59ffc9;border:2px solid black;padding:1px 7px;font-size:11px;cursor:help;position:relative";
+  bankPill.textContent="💰$"+bankTotal(p)+"M";
+  // Hover tooltip showing money breakdown
+  const tooltip=document.createElement("div");
+  tooltip.style.cssText="display:none;position:absolute;top:100%;left:0;background:white;border:3px solid black;padding:8px;z-index:999;min-width:120px;box-shadow:4px 4px 0 0 #000;font-size:11px;font-weight:700;white-space:nowrap";
+  if(p.bank.length){
+    const grouped={};p.bank.forEach(c=>{grouped[c.value]=(grouped[c.value]||0)+1;});
+    tooltip.innerHTML="<div style='font-size:9px;color:#888;margin-bottom:4px'>BANK BREAKDOWN</div>"+
+      Object.entries(grouped).sort(([a],[b])=>Number(a)-Number(b)).map(([v,cnt])=>`<div>${cnt}× $${v}M</div>`).join("");
+  }else{tooltip.textContent="Bank empty";}
+  bankPill.appendChild(tooltip);
+  bankPill.onmouseenter=()=>tooltip.style.display="block";
+  bankPill.onmouseleave=()=>tooltip.style.display="none";
+  badge.innerHTML=`<div style="width:24px;height:24px;background:${col};border:2px solid black;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:10px;font-weight:900">${p.name[0].toUpperCase()}</div><span>${p.name}</span><span style="background:#ffe600;border:2px solid black;padding:1px 7px;font-size:11px">🃏${p.hand.length}</span>`;
+  badge.appendChild(bankPill);
+  if(actionsInfo){const ai=document.createElement("span");ai.innerHTML=actionsInfo;badge.appendChild(ai);}
+  if(isT){const tt=document.createElement("span");tt.style.cssText="background:#4CAF50;color:white;font-size:10px;padding:1px 6px;border:1px solid black";tt.textContent="▶ TURN";badge.appendChild(tt);}
   wrap.appendChild(badge);
-  // Content row: bank stack + prop stacks
-  const row=document.createElement("div");row.style.cssText="display:flex;gap:12px;align-items:flex-end";
-  // Bank money — one unified stack, sorted by value ascending
-  if(p.bank.length>0){
-    const bankDiv=document.createElement("div");bankDiv.style.cssText="display:flex;flex-direction:column;align-items:center;gap:2px";
-    const bankLbl=document.createElement("div");bankLbl.style.cssText="font-size:8px;font-weight:800;font-family:Montserrat,sans-serif;margin-bottom:4px";bankLbl.textContent="BANK $"+bankTotal(p)+"M";bankDiv.appendChild(bankLbl);
-    const sorted=[...p.bank].sort((a,b)=>a.value-b.value);
-    const stackH=76+(sorted.length-1)*8;
-    const sw=document.createElement("div");sw.style.cssText=`position:relative;width:76px;height:${stackH}px;flex-shrink:0`;
-    sorted.forEach((c,ci)=>{
-      const ms=MONEY_STYLE[c.value]||MONEY_STYLE[1];
-      sw.innerHTML+=`<div class="ocard" style="position:absolute;left:0;top:${ci*8}px;z-index:${ci};background:${ms.bg}">
-        <div class="oc-top" style="background:${ms.bg};border-color:rgba(0,0,0,.2)"></div>
-        <div class="oc-mid"><span style="font-size:18px;font-weight:900;color:${ms.color}">$${c.value}M</span></div>
-        <div class="oc-bot" style="color:${ms.color}">MONEY</div>
-      </div>`;
-    });
-    bankDiv.appendChild(sw);row.appendChild(bankDiv);
-  }
-  // Property stacks — each color group stacked
-  const propsDiv=document.createElement("div");propsDiv.style.cssText="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap";
+  // Only property stacks — no bank money cards shown
+  const row=document.createElement("div");row.style.cssText="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap";
   let hasProps=false;
   Object.keys(PC).forEach(color=>{
     const cards=p.properties[color]||[];if(!cards.length)return;hasProps=true;
@@ -718,25 +767,33 @@ function buildOppBlock(p){
     grpDiv.appendChild(sw);
     const lbl=document.createElement("div");lbl.style.cssText=`font-size:8px;font-weight:800;font-family:Montserrat,sans-serif;background:${complete?"#ffe600":"#e2e2e2"};border:1px solid black;padding:1px 5px;margin-top:4px`;
     lbl.textContent=cards.length+"/"+needed;grpDiv.appendChild(lbl);
-    propsDiv.appendChild(grpDiv);
+    row.appendChild(grpDiv);
   });
-  if(hasProps)row.appendChild(propsDiv);
-  wrap.appendChild(row);
+  if(hasProps)wrap.appendChild(row);
+  // Footer: only sets, no total money
   const footer=document.createElement("div");footer.style.cssText="font-size:9px;font-weight:700;font-family:Montserrat,sans-serif;color:white;background:black;padding:2px 10px;margin-top:2px";
-  footer.textContent="Total: $"+(bankTotal(p)+propTotal(p))+"M | "+setsCount(p)+"/3 sets";
+  footer.textContent=setsCount(p)+"/3 sets";
   wrap.appendChild(footer);
   return wrap;
 }
 
 function renderMyTable(me,myTurn){
   document.getElementById("bankLabel").textContent="$"+bankTotal(me)+"M";
+  // Update actions badge with player name + actions
+  const header=document.querySelector("#myTable .mt-title");
+  if(header){
+    if(myTurn&&G.phase==="play"){
+      header.innerHTML='YOUR TABLE <span style="font-size:13px;font-weight:700;color:#888;margin-left:8px">— '+G.actionsLeft+' action'+(G.actionsLeft!==1?'s':'')+' left</span>';
+    }else{
+      header.textContent="YOUR TABLE";
+    }
+  }
   const bc=document.getElementById("myBankCards");bc.innerHTML="";
   if(!me.bank.length){bc.innerHTML='<div style="font-size:11px;color:#aaa;padding:4px">Empty</div>';}
   else{
-    // Stack ALL money cards in one pile sorted by value ascending (smallest on top)
     const sorted=[...me.bank].sort((a,b)=>a.value-b.value);
     const stackH=88+(sorted.length-1)*8;
-    const sw=document.createElement("div");sw.style.cssText=`position:relative;width:60px;height:${stackH}px;flex-shrink:0`;
+    const sw=document.createElement("div");sw.style.cssText=`position:relative;width:60px;height:${stackH}px;flex-shrink:0;cursor:help`;
     sorted.forEach((c,ci)=>{
       const ms=MONEY_STYLE[c.value]||MONEY_STYLE[1];
       sw.innerHTML+=`<div class="mcard" style="position:absolute;left:0;top:${ci*8}px;z-index:${ci};background:${ms.bg}">
@@ -745,10 +802,19 @@ function renderMyTable(me,myTurn){
         <div class="mc-bot" style="color:${ms.color}">MONEY</div>
       </div>`;
     });
-    // Total label on top
+    // Hover tooltip showing breakdown
+    const tooltip=document.createElement("div");
+    const grouped={};me.bank.forEach(c=>{grouped[c.value]=(grouped[c.value]||0)+1;});
+    tooltip.style.cssText="display:none;position:absolute;bottom:100%;left:68px;background:white;border:3px solid black;padding:8px 10px;z-index:999;min-width:130px;box-shadow:4px 4px 0 0 #000;font-family:Montserrat,sans-serif;font-size:11px;font-weight:700;white-space:nowrap;line-height:1.8";
+    tooltip.innerHTML="<div style='font-size:9px;color:#888;margin-bottom:4px'>YOUR BANK BREAKDOWN</div>"+
+      Object.entries(grouped).sort(([a],[b])=>Number(a)-Number(b)).map(([v,cnt])=>`<div>${cnt}× $${v}M</div>`).join("")+
+      `<div style='margin-top:4px;border-top:1px solid #ddd;padding-top:4px'>Total: $${bankTotal(me)}M</div>`;
+    sw.appendChild(tooltip);
+    sw.onmouseenter=()=>tooltip.style.display="block";
+    sw.onmouseleave=()=>tooltip.style.display="none";
     const tot=document.createElement("div");tot.style.cssText="font-size:8px;font-weight:800;font-family:Montserrat,sans-serif;margin-top:4px;text-align:center";
-    tot.textContent="$"+bankTotal(me)+"M ("+sorted.length+" cards)";
-    const wrap=document.createElement("div");wrap.style.cssText="display:flex;flex-direction:column;align-items:center";
+    tot.textContent="$"+bankTotal(me)+"M ("+sorted.length+")";
+    const wrap=document.createElement("div");wrap.style.cssText="display:flex;flex-direction:column;align-items:center;position:relative";
     wrap.appendChild(sw);wrap.appendChild(tot);
     bc.appendChild(wrap);
   }
@@ -761,13 +827,19 @@ function renderMyTable(me,myTurn){
     const stackH=88+(cards.length-1)*12;
     const sw=document.createElement("div");sw.style.cssText=`position:relative;width:60px;height:${stackH}px;flex-shrink:0`;
     cards.forEach((card,ci)=>{
-      sw.innerHTML+=`<div class="mcard" style="position:absolute;left:0;top:${ci*12}px;z-index:${ci}">
-        <div class="mc-top" style="background:${PC[color].bg}"><span style="font-size:6px;font-weight:700;color:${PC[color].fg};text-align:center">${card.name}</span></div>
-        <div class="mc-mid"><span style="font-size:13px;font-weight:900;color:${PC[color].bg}">$${card.value}M</span></div>
-        <div class="mc-bot">Property</div>
+      const isWild=card.type==="wild";
+      const canMove=isWild&&myTurn&&G.phase==="play"&&G.actionsLeft>0;
+      const cardEl=document.createElement("div");
+      cardEl.style.cssText=`position:absolute;left:0;top:${ci*12}px;z-index:${ci};cursor:${canMove?"pointer":"default"}`;
+      cardEl.innerHTML=`<div class="mcard"${canMove?' title="Click to move this wild card (1 action)"':""}>
+        <div class="mc-top" style="background:${isWild?"linear-gradient(90deg,#FF1493,#0000FF,#FFA500)":PC[color].bg}"><span style="font-size:6px;font-weight:700;color:${PC[color].fg};text-align:center">${card.name||"Wild"}</span></div>
+        <div class="mc-mid"><span style="font-size:13px;font-weight:900;color:${isWild?"#9c27b0":PC[color].bg}">$${card.value}M</span></div>
+        <div class="mc-bot">${isWild?"🌈 Wild":"Property"}</div>
       </div>`;
+      if(canMove){cardEl.onclick=()=>openModal({type:"moveWild",cardId:card.id,cardName:card.label||"Wild Property",fromColor:color,colors:card.colors||Object.keys(PC)});}
+      sw.appendChild(cardEl);
     });
-    if(complete){sw.innerHTML+=`<div style="position:absolute;top:-7px;right:-5px;background:#ffe600;border:2px solid black;font-size:7px;font-weight:800;padding:1px 4px;z-index:20;font-family:Montserrat,sans-serif">${impr.hotel?"🏨":impr.house?"🏠":"SET"}</div>`;}
+    if(complete){const tag=document.createElement("div");tag.style.cssText="position:absolute;top:-7px;right:-5px;background:#ffe600;border:2px solid black;font-size:7px;font-weight:800;padding:1px 4px;z-index:20;font-family:Montserrat,sans-serif";tag.textContent=impr.hotel?"🏨":impr.house?"🏠":"SET";sw.appendChild(tag);}
     grp.appendChild(sw);
     const lbl=document.createElement("div");lbl.style.cssText=`font-size:8px;font-weight:800;font-family:Montserrat,sans-serif;background:${complete?"#ffe600":"#e2e2e2"};border:1px solid black;padding:1px 5px;margin-top:4px`;
     lbl.textContent=cards.length+"/"+needed+" SET";grp.appendChild(lbl);
@@ -921,7 +993,7 @@ function handleAction(card,ci){
   else if(card.name==="House"||card.name==="Hotel")openModal({type:"improvement",cardIdx:ci,improvType:card.name.toLowerCase()});
   else if(card.name==="Forced Deal")openModal({type:"forcedDeal",cardIdx:ci});
   else if(card.name==="Just Say No")showToast("Just Say No can only cancel an action against you!")
-  else if(card.name==="Double Rent")showToast("Double Rent must be played together with a Rent card. Select both, then Play Card.")
+  else if(card.name==="Double Rent")showToast("Double Rent must be played with a Rent card. Select both, then Play Card.")
   else handleBankSelected();
 }
 function handleEndTurn(){
@@ -933,6 +1005,39 @@ function advanceTurn(){
   addLog(G,"It is "+G.players[G.currentPlayer].name+"'s turn.",G.currentPlayer,true);selectedCards=[];bcastGame();closeModal();
 }
 
+// ── JSN CHAIN — checks JSN for each player in a list sequentially ────────
+// Used by Birthday and Rent All to give each target a chance to use JSN.
+// onAllDone() is called after all players have responded.
+// modalStep.jsnUsedBy tracks who used JSN (by player index).
+function checkJSNChain(targets,idx,actionLabel,cardIdx,onAllDone){
+  if(idx>=targets.length){onAllDone();return;}
+  const target=targets[idx];
+  const targetPlayerIdx=target._i!==undefined?target._i:target.id;
+  // Skip if this player has no JSN
+  if(!target.hand.some(c=>c.name==="Just Say No")){
+    checkJSNChain(targets,idx+1,actionLabel,cardIdx,onAllDone);
+    return;
+  }
+  // This player has JSN — prompt them
+  _pendingJSN=(skipIdx)=>{
+    if(skipIdx!==null){
+      // They used JSN — record it, discard JSN (handled by jsn_response), continue chain
+      if(!modalStep.jsnUsedBy)modalStep.jsnUsedBy=[];
+      modalStep.jsnUsedBy.push(targetPlayerIdx);
+    }
+    checkJSNChain(targets,idx+1,actionLabel,cardIdx,onAllDone);
+  };
+  _pendingJSNActionCard=G.players[myPlayerIdx].hand[cardIdx]||null;
+  const cardId=_pendingJSNActionCard?_pendingJSNActionCard.id:null;
+  const jsnC=document.getElementById("jsnContainer");jsnC.innerHTML="";
+  const ov=document.createElement("div");ov.className="jsn-overlay";
+  const bx=document.createElement("div");bx.className="jsn-box";
+  bx.innerHTML=`<h2 style="font-size:19px;font-weight:900;margin-bottom:8px">⏳ Asking ${target.name}...</h2><p style="font-size:12px;color:#bbb;margin-bottom:18px">Does <strong>${target.name}</strong> want to use<br><strong>Just Say No</strong> against:<br><em>${actionLabel}</em>?</p>`;
+  const cb=document.createElement("button");cb.className="modal-btn ghost";cb.textContent="Cancel All";
+  cb.onclick=()=>{_pendingJSN=null;_pendingJSNActionCard=null;modalStep.jsnUsedBy=[];jsnC.innerHTML="";closeModal();};
+  bx.appendChild(cb);ov.appendChild(bx);jsnC.appendChild(ov);
+  channel.publish("jsn_prompt",{targetIdx:targetPlayerIdx,attackerIdx:myPlayerIdx,actionLabel,cardIdx,cardId});
+}
 // ── JSN ───────────────────────────────────────────────────────────────────
 // Store captured action card here so jsn_response can always find it
 
@@ -956,12 +1061,19 @@ function checkJSN(targetPlayerIdx,actionLabel,cardIdx,onConfirm){
   bx.appendChild(cb);ov.appendChild(bx);jsnC.appendChild(ov);
   channel.publish("jsn_prompt",{targetIdx:targetPlayerIdx,attackerIdx:myPlayerIdx,actionLabel,cardIdx,cardId});
 }
-function showJSNPrompt(actionLabel,attackerIdx){
+function showJSNPrompt(actionLabel,attackerIdx,cardId){
   jsnBeep();const attacker=G.players[attackerIdx];
   const jsnC=document.getElementById("jsnContainer");jsnC.innerHTML="";
   const ov=document.createElement("div");ov.className="jsn-overlay";
   const bx=document.createElement("div");bx.className="jsn-box";
-  bx.innerHTML=`<h2 style="font-size:21px;font-weight:900;margin-bottom:8px">🚫 Just Say No?</h2><p style="font-size:12px;color:#bbb;margin-bottom:18px"><strong>${attacker.name}</strong> is playing:<br><em>${actionLabel}</em><br><br>Block it?</p>`;
+  // Build card preview if we can identify the card
+  const attackerCard=G.players[attackerIdx].hand.find(c=>c.id===cardId)||G.players[attackerIdx].hand.find(c=>c.type==="action"&&!["Just Say No"].includes(c.name));
+  const cardPreviewHTML=attackerCard?`<div style="display:inline-block;margin:8px 0 12px;transform:rotate(-3deg)">${gcardInner(attackerCard)}</div>`:"";
+  bx.innerHTML=`<h2 style="font-size:20px;font-weight:900;margin-bottom:6px">🚫 Just Say No?</h2>
+    <p style="font-size:12px;color:#bbb;margin-bottom:4px"><strong>${attacker.name}</strong> is playing:</p>
+    <p style="font-size:13px;color:#ffe600;font-weight:700;margin-bottom:8px"><em>${actionLabel}</em></p>
+    ${cardPreviewHTML?`<div style="display:flex;justify-content:center;margin-bottom:12px"><div class="gcard" style="cursor:default;pointer-events:none">${gcardInner(attackerCard)}</div></div>`:""}
+    <p style="font-size:11px;color:#aaa;margin-bottom:18px">Block it with your Just Say No card?</p>`;
   const yb=document.createElement("button");yb.className="modal-btn danger";yb.style.cssText="width:100%;padding:13px;font-size:14px;margin-bottom:8px";yb.textContent="🚫 JUST SAY NO!";
   yb.onclick=()=>{jsnC.innerHTML="";channel.publish("jsn_response",{attackerIdx,targetIdx:myPlayerIdx,used:true});};
   const nb=document.createElement("button");nb.className="modal-btn ghost";nb.style.cssText="width:100%;padding:11px";nb.textContent="Allow it";
@@ -1069,6 +1181,35 @@ function renderModal(){
       B("Back","ghost",()=>{modalStep.myColor=undefined;renderModal();});B("Cancel","ghost",closeModal);
     }
   }
+  else if(m.type==="moveWild"){
+    T("🌈 Move Wild Card");S("Move "+m.cardName+" to a different color group. Costs 1 action.");
+    const validColors=m.colors.filter(c=>{
+      if(c===m.fromColor)return false; // can't stay in same group
+      const existing=(me.properties[c]||[]).length;
+      return existing<PC[c].needed; // can't move into a complete set
+    });
+    if(!validColors.length)W("No valid colors to move this wild to!");
+    validColors.forEach(c=>{
+      const p=PC[c];const existing=(me.properties[c]||[]).length;
+      CB(p.label+" ("+existing+"/"+p.needed+")",p.bg,p.fg,()=>{
+        G=clone(G);const pl=G.players[myPlayerIdx];
+        // Remove from old color
+        const fromArr=pl.properties[m.fromColor]||[];
+        const pos=fromArr.findIndex(c2=>c2.id===m.cardId);
+        if(pos>=0){
+          const[movedCard]=fromArr.splice(pos,1);
+          movedCard.chosenColor=c;
+          if(!pl.properties[c])pl.properties[c]=[];
+          pl.properties[c].push(movedCard);
+          G.actionsLeft--;
+          addLog(G,pl.name+" moved wild card from "+PC[m.fromColor].label+" to "+PC[c].label+".",myPlayerIdx);
+          selectedCards=[];if(checkWinner(pl))G.winner=pl.name;bcastGame();
+        }
+        closeModal();
+      });
+    });
+    B("Cancel","ghost",closeModal);
+  }
   else if(m.type==="improvement"){
     const valid=Object.entries(me.properties).filter(([c,a])=>a.length>=PC[c].needed).filter(([c])=>{const im=me.improvements[c]||{};return m.improvType==="house"?!im.house:im.house&&!im.hotel;});
     T(m.improvType==="house"?"🏠 Add House":"🏨 Add Hotel");if(!valid.length)W("No valid sets!");
@@ -1090,64 +1231,118 @@ function renderModal(){
   }
 }
 
-function resolveRentAll(m,color,rent,doubled=false){
-  G=clone(G);const p=G.players[myPlayerIdx];
-  const targets=G.players.filter((_,i)=>i!==myPlayerIdx);
-  targets.forEach(t=>payPlayer(t,p,rent));
-  // Discard rent card
-  p.hand.splice(m.cardIdx,1);
-  // If doubled, also discard the Double Rent card (find by index stored in modal)
-  if(doubled&&m.doubleRentIdx!=null){
-    // Index may have shifted by 1 if cardIdx < doubleRentIdx
-    const drIdx=m.doubleRentIdx>(m.cardIdx)?m.doubleRentIdx-1:m.doubleRentIdx;
-    if(drIdx>=0&&drIdx<p.hand.length&&p.hand[drIdx]?.name==="Double Rent"){
-      const[dr]=p.hand.splice(drIdx,1);G.discard.push(dr);
-    } else {
-      // Fallback: find by name
-      const fallback=p.hand.findIndex(c=>c.name==="Double Rent");
-      if(fallback>=0){const[dr]=p.hand.splice(fallback,1);G.discard.push(dr);}
-    }
+function paymentDigest(debtor,paid,owed){
+  // Build a human-readable summary of how a payment was made
+  const bankGiven=debtor._lastPayBank||[];
+  const propsGiven=debtor._lastPayProps||[];
+  let parts=[];
+  if(bankGiven.length){
+    const grouped={};bankGiven.forEach(c=>{grouped[c.value]=(grouped[c.value]||0)+1;});
+    parts.push(Object.entries(grouped).map(([v,cnt])=>cnt+"×$"+v+"M").join(", ")+" from bank");
   }
-  G.actionsLeft--; // 1 action total even with Double Rent
-  addLog(G,p.name+" charged $"+rent+"M ("+PC[color].label+")"+(doubled?" [DOUBLED]":"")+" to everyone!",myPlayerIdx);
-  selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
+  if(propsGiven.length) parts.push(propsGiven.map(c=>c.name).join(", ")+" (property)");
+  if(!parts.length) parts.push("nothing (had no assets)");
+  const over=paid-owed;
+  return parts.join(" + ")+(over>0?" [overpaid $"+over+"M, no change]":"");
+}
+
+// Enhanced payPlayer that also records what was given for digest logging
+function payPlayerWithDigest(debtor,creditor,owed){
+  const bankBefore=[...debtor.bank];
+  const propsBefore={};Object.entries(debtor.properties).forEach(([c,a])=>{propsBefore[c]=[...a];});
+  const paid=payPlayer(debtor,creditor,owed);
+  // Figure out what was taken from bank
+  const bankAfterIds=new Set(debtor.bank.map(c=>c.id));
+  debtor._lastPayBank=bankBefore.filter(c=>!bankAfterIds.has(c.id));
+  // Figure out what props were taken
+  const takenProps=[];
+  Object.entries(propsBefore).forEach(([color,oldCards])=>{
+    const newIds=new Set((debtor.properties[color]||[]).map(c=>c.id));
+    oldCards.filter(c=>!newIds.has(c.id)).forEach(c=>takenProps.push(c));
+  });
+  debtor._lastPayProps=takenProps;
+  return paid;
+}
+
+function resolveRentAll(m,color,rent,doubled=false){
+  const targets=G.players.filter((_,i)=>i!==myPlayerIdx);
+  if(!modalStep.jsnUsedBy)modalStep.jsnUsedBy=[];
+  checkJSNChain(targets,0,"Rent $"+rent+"M on "+PC[color].label+" (All players)",m.cardIdx,()=>{
+    G=clone(G);const p=G.players[myPlayerIdx];
+    const jsnUsedBy=modalStep.jsnUsedBy||[];
+    const digestParts=[];
+    G.players.forEach((t,ti)=>{
+      if(ti===myPlayerIdx)return;
+      if(jsnUsedBy.includes(ti)){digestParts.push(t.name+": blocked (JSN)");return;}
+      const paid=payPlayerWithDigest(t,p,rent);
+      digestParts.push(t.name+": "+paymentDigest(t,paid,rent));
+    });
+    p.hand.splice(m.cardIdx,1);
+    if(doubled&&m.doubleRentIdx!=null){
+      const drIdx=m.doubleRentIdx>(m.cardIdx)?m.doubleRentIdx-1:m.doubleRentIdx;
+      if(drIdx>=0&&drIdx<p.hand.length&&p.hand[drIdx]?.name==="Double Rent"){
+        const[dr]=p.hand.splice(drIdx,1);G.discard.push(dr);
+      }else{
+        const fb=p.hand.findIndex(c=>c.name==="Double Rent");
+        if(fb>=0){const[dr]=p.hand.splice(fb,1);G.discard.push(dr);}
+      }
+    }
+    G.actionsLeft-=doubled?2:1;
+    addLog(G,p.name+" charged $"+rent+"M ("+PC[color].label+")"+(doubled?" [DOUBLED]":"")+" to "+(jsnUsedBy.length>0?(targets.length-jsnUsedBy.length)+" player(s)":"everyone")+"!",myPlayerIdx);
+    digestParts.forEach(d=>addLog(G,"  → "+d,myPlayerIdx));
+    modalStep.jsnUsedBy=[];
+    selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
+    });
 }
 
 function resolveM(action,arg1,arg2){
   const m=currentModal;if(!m)return;const me=G.players[myPlayerIdx];
   if(action==="birthday"){
-    G=clone(G);const p=G.players[myPlayerIdx];
-    G.players.forEach((t,ti)=>{if(ti===myPlayerIdx)return;payPlayer(t,p,2);});
-    p.hand.splice(m.cardIdx,1);G.actionsLeft--;
-    addLog(G,p.name+" played Birthday! Collected $2M from all players.",myPlayerIdx);
-    selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
+    const targets=G.players.filter((_,ti)=>ti!==myPlayerIdx);
+    if(!modalStep.jsnUsedBy)modalStep.jsnUsedBy=[];
+    checkJSNChain(targets,0,"It's My Birthday — collect $2M",m.cardIdx,()=>{
+      G=clone(G);const p=G.players[myPlayerIdx];
+      const jsnUsedBy=modalStep.jsnUsedBy||[];
+      const digestParts=[];
+      G.players.forEach((t,ti)=>{
+        if(ti===myPlayerIdx)return;
+        if(jsnUsedBy.includes(ti)){digestParts.push(t.name+": blocked (JSN)");return;}
+        const paid=payPlayerWithDigest(t,p,2);
+        digestParts.push(t.name+": "+paymentDigest(t,paid,2));
+      });
+      p.hand.splice(m.cardIdx,1);G.actionsLeft--;
+      addLog(G,p.name+" played Birthday!",myPlayerIdx);
+      digestParts.forEach(d=>addLog(G,"  → "+d,myPlayerIdx));
+      modalStep.jsnUsedBy=[];
+      selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
+    });
   }
   else if(action==="debtCollector"){
     G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[arg1];
-    const paid=payPlayer(t,p,5);
+    const paid=payPlayerWithDigest(t,p,5);
     p.hand.splice(m.cardIdx,1);G.actionsLeft--;
-    addLog(G,p.name+" used Debt Collector on "+t.name+"! Got $"+paid+"M.",myPlayerIdx);
+    addLog(G,p.name+" used Debt Collector on "+t.name+"!",myPlayerIdx);
+    addLog(G,"  → "+t.name+" paid: "+paymentDigest(t,paid,5),myPlayerIdx);
     selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
   }
   else if(action==="rentOne"){
     G=clone(G);const p=G.players[myPlayerIdx];const t=G.players[arg1];
     const color=modalStep.color;const baseRent=getRent(p,color);
     const rent=m.doubled?baseRent*2:baseRent;
-    const paid=payPlayer(t,p,rent);
-    // Discard rent card
+    const paid=payPlayerWithDigest(t,p,rent);
     p.hand.splice(m.cardIdx,1);
-    // If doubled, discard Double Rent card too
     if(m.doubled&&m.doubleRentIdx!=null){
       const drIdx=m.doubleRentIdx>(m.cardIdx)?m.doubleRentIdx-1:m.doubleRentIdx;
       if(drIdx>=0&&drIdx<p.hand.length&&p.hand[drIdx]?.name==="Double Rent"){
         const[dr]=p.hand.splice(drIdx,1);G.discard.push(dr);
-      } else {
-        const fallback=p.hand.findIndex(c=>c.name==="Double Rent");
-        if(fallback>=0){const[dr]=p.hand.splice(fallback,1);G.discard.push(dr);}
+      }else{
+        const fb=p.hand.findIndex(c=>c.name==="Double Rent");
+        if(fb>=0){const[dr]=p.hand.splice(fb,1);G.discard.push(dr);}
       }
     }
-    G.actionsLeft--; // 1 action total
-    addLog(G,p.name+" charged "+t.name+" $"+rent+"M ("+PC[color].label+")"+(m.doubled?" [DOUBLED]":"")+" — paid $"+paid+"M.",myPlayerIdx);
+    G.actionsLeft-=m.doubled?2:1;
+    addLog(G,p.name+" charged "+t.name+" $"+rent+"M ("+PC[color].label+")"+(m.doubled?" [DOUBLED — 2 actions]":"")+".",myPlayerIdx);
+    addLog(G,"  → "+t.name+" paid: "+paymentDigest(t,paid,rent),myPlayerIdx);
     selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
   }
   else if(action==="slyDeal"){
