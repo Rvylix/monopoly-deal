@@ -365,7 +365,14 @@ function initGame(names){
     log:[{text:"Game started! "+names[0]+" goes first.",pi:-1,sys:true}],winner:null};
 }
 
-function checkWinner(p){return Object.entries(p.properties).filter(([c,a])=>a.length>=PC[c].needed).length>=3;}
+function checkWinner(p){
+  // Count sets where cards placed >= needed count for that color
+  const sets=Object.entries(p.properties).filter(([c,a])=>{
+    const needed=PC[c]?.needed;
+    return needed&&a.length>=needed;
+  }).length;
+  return sets>=3;
+}
 function getRent(p,color){
   const count=(p.properties[color]||[]).length;const arr=RENT[color]||[];
   const base=arr[Math.min(count-1,arr.length-1)]||0;const impr=p.improvements[color]||{};let bonus=0;
@@ -649,7 +656,15 @@ function showGame(){
   document.getElementById("game").style.display="flex";
   renderGame();if(isMyTurn())showTurnAlert();
 }
-async function bcastGame(){await channel.publish("game_update",{game:G});renderGame();if(G.winner)showWinner(G.winner);}
+async function bcastGame(){
+  // Check all players for winner before broadcasting
+  if(G&&!G.winner){
+    for(const p of G.players){
+      if(checkWinner(p)){G.winner=p.name;break;}
+    }
+  }
+  await channel.publish("game_update",{game:G});renderGame();if(G.winner)showWinner(G.winner);
+}
 function isMyTurn(){return G&&G.currentPlayer===myPlayerIdx;}
 function showTurnAlert(){turnBeep();const el=document.getElementById("turnAlert");el.style.display="block";setTimeout(()=>el.style.display="none",1800);}
 
@@ -717,8 +732,10 @@ function renderGame(){
   if(bw)bw.style.display=showActions?"none":"block";
   const badge=document.getElementById("actionsBadge");
   if(myTurn&&G.phase==="play"){badge.style.display="block";badge.textContent=G.actionsLeft+" ACTION"+(G.actionsLeft!==1?"S":"")+" LEFT";}
-  else badge.style.display="none";  const cnt=me.hand.length;
-  document.getElementById("handCnt").textContent=cnt;
+  else badge.style.display="none";
+  // Hand count — update here AND in renderHand for guarantee
+  const cnt=me.hand.length;
+  const hcEl=document.getElementById("handCnt");if(hcEl)hcEl.textContent=cnt;
   document.getElementById("handToggleLbl").innerHTML="YOUR HAND ("+cnt+") "+(handOpen?"▼":"▲");
 }
 
@@ -1231,17 +1248,36 @@ function renderModal(){
   function W(t){const d=document.createElement("div");d.className="warn-txt";d.textContent=t;bx.appendChild(d);}
 
   if(m.type==="pickWild"){
-    T("Pick Color for Wild Card");S("Which color group? (Complete sets are greyed out)");
+    T("Place Wild Card");
+    S("Wild card can only join a color group you already have cards in.");
+    const hasAny=m.colors.some(c=>{
+      const existing=(me.properties[c]||[]).length;
+      return existing>0&&existing<(PC[c]?.needed||99);
+    });
+    if(!hasAny){
+      // No valid incomplete groups to join — allow starting any color as a last resort
+      S("No incomplete groups available. Pick any color to start a new group:");
+    }
+    let shownAny=false;
     m.colors.forEach(c=>{
       const p=PC[c];if(!p)return;
       const existing=(me.properties[c]||[]).length;
-      const isFull=existing>=p.needed;
+      const needed=p.needed;
+      const isFull=existing>=needed;
+      const isEmpty=existing===0;
+      // Only show colors where player has ≥1 card in that color (not full, not empty)
+      // If no valid groups exist at all, show empty ones too
+      if(isEmpty&&hasAny)return; // skip empty groups when valid groups exist
       const b=document.createElement("button");b.className="color-btn";
-      b.style.cssText="background:"+p.bg+";color:"+p.fg+";opacity:"+(isFull?0.35:1)+";cursor:"+(isFull?"not-allowed":"pointer");
-      b.textContent=p.label+(isFull?" (FULL)":"")+" — "+existing+"/"+p.needed;
-      if(!isFull)b.onclick=()=>playProp(m.cardIdx,c);
+      b.style.cssText="background:"+p.bg+";color:"+p.fg+
+        ";opacity:"+(isFull?0.35:1)+
+        ";cursor:"+(isFull?"not-allowed":"pointer");
+      b.textContent=p.label+(isFull?" (FULL — cannot add)":isEmpty?" (new group)":"")+
+        " — "+existing+"/"+needed;
+      if(!isFull){b.onclick=()=>playProp(m.cardIdx,c);shownAny=true;}
       bx.appendChild(b);
     });
+    if(!shownAny){W("All your existing sets are full. Cannot place wild card here.");}
     B("Cancel","ghost",closeModal);
   }
   else if(m.type==="birthday"){T("🎂 It's My Birthday!");S("Collect $2M from each player.");B("Collect!","accent",()=>resolveM("birthday"));B("Cancel","ghost",closeModal);}
