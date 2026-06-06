@@ -227,11 +227,6 @@ body{background-color:#007456;background-image:repeating-linear-gradient(45deg,r
     <div id="handDrawer" class="closed">
       <div class="hand-container w-full" id="handCards"></div>
     </div>
-    <!-- Collapsed bar -->
-    <div id="handBar" class="px-4 flex items-center gap-3" style="height:36px">
-      <span style="font-family:Montserrat,sans-serif;font-size:11px;font-weight:800;background:white;border:2px solid black;padding:2px 10px;box-shadow:2px 2px 0 0 #000">YOUR HAND (<span id="handCntBar">0</span>)</span>
-      <span style="font-size:10px;color:#888;font-family:Montserrat,sans-serif">▲ click to show</span>
-    </div>
   </footer>
 </div>
 
@@ -658,7 +653,6 @@ function showTurnAlert(){turnBeep();const el=document.getElementById("turnAlert"
 function toggleHand(){
   handOpen=!handOpen;
   document.getElementById("handDrawer").className=handOpen?"open":"closed";
-  document.getElementById("handBar").style.display=handOpen?"none":"flex";
   const cnt=G?G.players[myPlayerIdx].hand.length:0;
   document.getElementById("handToggleLbl").innerHTML="YOUR HAND ("+cnt+") "+(handOpen?"▼":"▲");
 }
@@ -703,8 +697,9 @@ function renderGame(){
     sel.some(c=>c.type==="action"&&c.name.startsWith("Rent"))&&
     sel.some(c=>c.type==="action"&&c.name==="Double Rent");
   const canPlay=canPlay1||canPlay2;
-  // Bank: any single non-JSN card (money, property, wild, action except JSN)
-  const canBank=myTurn&&G.phase==="play"&&sel.length===1&&sel[0].name!=="Just Say No";
+  // Bank: only money cards and action cards (NOT property, wild, or JSN)
+  const canBank=myTurn&&G.phase==="play"&&sel.length===1&&
+    sel[0].type==="money"||(sel.length===1&&sel[0].type==="action"&&sel[0].name!=="Just Say No"&&sel[0].type!=="property"&&sel[0].type!=="wild");
   const bp=document.getElementById("btnPlay");const be=document.getElementById("btnEnd");const bb=document.getElementById("btnBank");
   bp.style.display=myTurn&&G.phase==="play"?"inline-flex":"none";bp.disabled=!canPlay||G.actionsLeft===0;
   be.style.display=myTurn&&G.phase==="play"?"inline-flex":"none";
@@ -712,7 +707,7 @@ function renderGame(){
   const badge=document.getElementById("actionsBadge");
   if(myTurn&&G.phase==="play"){badge.style.display="block";badge.textContent=G.actionsLeft+" ACTION"+(G.actionsLeft!==1?"S":"")+" LEFT";}
   else badge.style.display="none";  const cnt=me.hand.length;
-  ["handCnt","handCntBar"].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=cnt;});
+  document.getElementById("handCnt").textContent=cnt;
   document.getElementById("handToggleLbl").innerHTML="YOUR HAND ("+cnt+") "+(handOpen?"▼":"▲");
 }
 
@@ -854,9 +849,21 @@ function renderMyTable(me,myTurn){
       const canMove=isWild&&myTurn&&G.phase==="play"&&G.actionsLeft>0;
       const cardEl=document.createElement("div");
       cardEl.style.cssText=`position:absolute;left:0;top:${ci*12}px;z-index:${ci};cursor:${canMove?"pointer":"default"}`;
+      // Wild card: use its original colors for the header (rainbow or dual-color)
+      // Property card: use the color group's bg
+      const headerBg=isWild
+        ? wildCardHeader(card.colors||[])
+        : `background:${PC[color]?.bg||"#888"}`;
+      const headerFg=isWild?"#fff":PC[color]?.fg||"#fff";
+      const displayName=isWild?(card.label||"Wild"):(card.name||"");
+      const nameFontSize=displayName.length>14?"5px":displayName.length>10?"6px":"7px";
       cardEl.innerHTML=`<div class="mcard"${canMove?' title="Click to move this wild card (1 action)"':""}>
-        <div class="mc-top" style="background:${isWild?"linear-gradient(90deg,#FF1493,#0000FF,#FFA500)":PC[color].bg}"><span style="font-size:6px;font-weight:700;color:${PC[color].fg};text-align:center">${card.name||"Wild"}</span></div>
-        <div class="mc-mid"><span style="font-size:13px;font-weight:900;color:${isWild?"#9c27b0":PC[color].bg}">$${card.value}M</span></div>
+        <div class="mc-top" style="${headerBg};padding:1px 2px">
+          <span style="font-size:${nameFontSize};font-weight:700;color:${headerFg};text-align:center;display:block;word-break:break-word;line-height:1.2">${displayName}</span>
+        </div>
+        <div class="mc-mid">
+          <span style="font-size:13px;font-weight:900;color:${isWild?"#9c27b0":PC[color]?.bg||"#888"}">$${card.value}M</span>
+        </div>
         <div class="mc-bot">${isWild?"🌈 Wild":"Property"}</div>
       </div>`;
       if(canMove){cardEl.onclick=()=>openModal({type:"moveWild",cardId:card.id,cardName:card.label||"Wild Property",fromColor:color,colors:card.colors||Object.keys(PC)});}
@@ -974,6 +981,7 @@ function handleBankSelected(){
   const card=p.hand[idx];
   if(!card){selectedCards=[];renderGame();return;}
   if(card.name==="Just Say No"){showToast("Just Say No cannot be banked!");selectedCards=[];renderGame();return;}
+  if(card.type==="property"||card.type==="wild"){showToast("Property and Wild cards cannot be banked. Play them to your board instead.");selectedCards=[];renderGame();return;}
   // All non-JSN cards can be banked at face value
   p.hand.splice(idx,1);
   // Assign a bank value: money uses face value, others use card value field
@@ -1115,27 +1123,77 @@ function showJSNPrompt(actionLabel,attackerIdx,cardId){
   const ov=document.createElement("div");ov.className="jsn-overlay";
   const bx=document.createElement("div");bx.className="jsn-box";
 
-  // Parse action type and property from the label
-  // Labels are like: "Sly Deal — stealing Vermont Ave (Lt.Blue) from Bob"
-  //                  "Deal Breaker — stealing complete Green set (...) from Bob"
-  //                  "Forced Deal — swapping X for Y with Bob"
-  //                  "Rent $3M on Orange (All players)"
-  //                  "Debt Collector $5M"
-  //                  "It's My Birthday — collect $2M"
-  let propHtml="";
-  // Extract property/color info to display prominently
-  const colorMatch=actionLabel.match(/\(([A-Za-z\s.]+)\)/);
+  // Try to find the specific property card(s) involved from the actionLabel
+  // Labels: "Sly Deal — stealing Vermont Ave (Lt.Blue) from Bob"
+  //         "Deal Breaker — stealing complete Orange set (St. James Pl, Tennessee Ave...) from Bob"
+  //         "Forced Deal — swapping States Ave for Tennessee Ave with Bob"
+  //         "Rent $3M on Orange (All players)"  /  "Debt Collector $5M"  /  "It's My Birthday..."
+  let cardPreviewsHTML="";
+
+  // Find property cards mentioned — search all players' properties for matching names
+  function findPropCard(name){
+    for(const player of G.players){
+      for(const [c,arr] of Object.entries(player.properties)){
+        const found=arr.find(card=>card.name===name||(card.label&&card.label===name));
+        if(found)return{...found,color:c};
+      }
+    }
+    return null;
+  }
+
+  // Extract property names from label — match quoted or comma-separated names
+  // Strategy: look for known property names that appear in the label
+  const mentionedCards=[];
+  G.players.forEach(player=>{
+    Object.entries(player.properties).forEach(([c,arr])=>{
+      arr.forEach(card=>{
+        if(card.name&&actionLabel.includes(card.name)){
+          mentionedCards.push({...card,color:c});
+        }
+      });
+    });
+  });
+
+  // Also check attacker's hand for the action card that has rentColors
+  const attackerActionCard=G.players[attackerIdx].hand.find(c=>c.id===cardId);
+
+  // If it's a rent action, highlight the color group
+  const colorMatch=actionLabel.match(/\(([A-Za-z\s.+/]+)\)/);
   const colorName=colorMatch?colorMatch[1].trim():null;
-  const colorKey=colorName?Object.keys(PC).find(k=>PC[k].label.toLowerCase()===colorName.toLowerCase()):null;
-  if(colorKey){
+  const colorKey=colorName?Object.keys(PC).find(k=>
+    PC[k].label.toLowerCase()===colorName.toLowerCase()||
+    PC[k].label.toLowerCase().replace(/\./g,"")===(colorName||"").toLowerCase().replace(/\./g,"")
+  ):null;
+
+  if(mentionedCards.length>0){
+    // Show actual property card previews
+    cardPreviewsHTML=`<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:10px 0 14px">
+      ${mentionedCards.slice(0,3).map(card=>{
+        const col=PC[card.color]||{bg:"#888",fg:"#fff",label:"?"};
+        const name=card.name||"";
+        const fs=name.length>16?"5px":name.length>12?"6px":"7px";
+        return `<div style="width:70px;height:98px;border:3px solid black;background:white;display:flex;flex-direction:column;box-shadow:3px 3px 0 0 #000;flex-shrink:0">
+          <div style="height:22px;background:${col.bg};display:flex;align-items:center;justify-content:center;padding:2px 3px;flex-shrink:0">
+            <span style="font-size:${fs};font-weight:700;color:${col.fg};text-align:center;line-height:1.2;word-break:break-word">${name}</span>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4px 2px">
+            <span style="font-size:18px;font-weight:900;color:${col.bg};font-family:Georgia,serif">$${card.value}M</span>
+            <span style="font-size:7px;color:#888;margin-top:2px">${col.label}</span>
+          </div>
+          <div style="height:14px;border-top:2px solid black;display:flex;align-items:center;justify-content:center;font-size:6px;font-weight:700;background:#f5f5f5">Property</div>
+        </div>`;
+      }).join("")}
+    </div>`;
+  } else if(colorKey){
+    // Rent action — show color pill
     const col=PC[colorKey];
-    propHtml=`<div style="display:inline-block;background:${col.bg};color:${col.fg};padding:6px 16px;border:3px solid black;box-shadow:3px 3px 0 0 #000;font-size:13px;font-weight:800;margin:10px 0 14px;font-family:Montserrat,sans-serif">${col.label} Properties</div>`;
+    cardPreviewsHTML=`<div style="display:inline-block;background:${col.bg};color:${col.fg};padding:8px 20px;border:3px solid black;box-shadow:3px 3px 0 0 #000;font-size:14px;font-weight:800;margin:10px 0 14px;font-family:Montserrat,sans-serif">${col.label} — Rent!</div>`;
   }
 
   bx.innerHTML=`<h2 style="font-size:20px;font-weight:900;margin-bottom:6px">🚫 Just Say No?</h2>
     <p style="font-size:12px;color:#bbb;margin-bottom:4px"><strong>${attacker.name}</strong> is playing against you:</p>
-    <p style="font-size:13px;color:#ffe600;font-weight:700;margin-bottom:4px;line-height:1.4"><em>${actionLabel}</em></p>
-    ${propHtml}
+    <p style="font-size:12px;color:#ffe600;font-weight:700;margin-bottom:4px;line-height:1.4"><em>${actionLabel}</em></p>
+    ${cardPreviewsHTML}
     <p style="font-size:11px;color:#aaa;margin-bottom:18px">Use your Just Say No to block it?</p>`;
   const yb=document.createElement("button");yb.className="modal-btn danger";yb.style.cssText="width:100%;padding:13px;font-size:14px;margin-bottom:8px";yb.textContent="🚫 JUST SAY NO!";
   yb.onclick=()=>{jsnC.innerHTML="";channel.publish("jsn_response",{attackerIdx,targetIdx:myPlayerIdx,used:true});};
