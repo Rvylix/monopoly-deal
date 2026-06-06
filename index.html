@@ -540,6 +540,23 @@ async function joinRoom(){
   myName=document.getElementById("myName").value.trim();const code=document.getElementById("joinCode").value.trim().toUpperCase();
   if(!myName){setStatus("Enter your name",true);return;}if(code.length<4){setStatus("Enter a valid code",true);return;}
   roomCode=code;isHost=false;setStatus("Joining…");showWaiting();await subscribeRoom();startPing();
+  // Room existence check — if no room_state in 5s, the room doesn't exist
+  const roomCheckTimer=setTimeout(()=>{
+    if(!_po){
+      // Never confirmed — room doesn't exist or host hasn't created it
+      clearInterval(_pt);
+      if(ablyClient)ablyClient.close();
+      document.getElementById("waitingRoom").style.display="none";
+      document.getElementById("lobby").style.display="flex";
+      setStatus("Room not found. Check the code and try again.",true);
+      roomCode="";myPlayerIdx=-1;
+    }
+  },5000);
+  // Cancel the check if we successfully join
+  const origPo=_po;
+  const checkJoinSuccess=setInterval(()=>{
+    if(_po){clearTimeout(roomCheckTimer);clearInterval(checkJoinSuccess);}
+  },200);
 }
 let _pt=null,_po=false;
 function startPing(){_po=false;_pt=setInterval(()=>{if(_po){clearInterval(_pt);return;}channel.publish("join",{name:myName});},1500);channel.publish("join",{name:myName});}
@@ -757,10 +774,16 @@ function buildOppBlock(p){
     const stackH=108+(cards.length-1)*14;
     const sw=document.createElement("div");sw.style.cssText=`position:relative;width:76px;height:${stackH}px;flex-shrink:0`;
     cards.forEach((card,ci)=>{
+      const isWild=card.type==="wild";
+      const cardColors=card.colors||[];
+      const headerBg=isWild?wildCardHeader(cardColors):`background:${PC[color].bg}`;
+      const headerFg=isWild?"#fff":PC[color].fg;
+      const displayName=isWild?(card.label||"Wild Property"):card.name||"";
+      const nameFontSize=displayName.length>14?"6px":"7px";
       sw.innerHTML+=`<div class="ocard" style="position:absolute;left:0;top:${ci*14}px;z-index:${ci}">
-        <div class="oc-top" style="background:${PC[color].bg}"><span style="font-size:7px;font-weight:700;color:${PC[color].fg};text-align:center;line-height:1.1">${card.name}</span></div>
-        <div class="oc-mid"><span style="font-size:16px;font-weight:900;color:${PC[color].bg}">$${card.value}M</span><span style="font-size:7px;color:#888">${PC[color].label}</span></div>
-        <div class="oc-bot">Property</div>
+        <div class="oc-top" style="${headerBg}"><span style="font-size:${nameFontSize};font-weight:700;color:${headerFg};text-align:center;line-height:1.1;word-break:break-word">${displayName}</span></div>
+        <div class="oc-mid"><span style="font-size:16px;font-weight:900;color:${isWild?"#9c27b0":PC[color].bg}">$${card.value}M</span><span style="font-size:7px;color:#888">${isWild?"Wild":PC[color].label}</span></div>
+        <div class="oc-bot">${isWild?"🌈 Wild":"Property"}</div>
       </div>`;
     });
     if(complete){sw.innerHTML+=`<div style="position:absolute;top:-8px;right:-6px;background:#ffe600;border:2px solid black;font-size:8px;font-weight:800;padding:1px 5px;z-index:20;font-family:Montserrat,sans-serif">SET</div>`;}
@@ -880,6 +903,16 @@ function renderHand(me){
 }
 
 // ── STANDARDIZED CARD INNER (for gcard 90×128) ───────────────────────────
+function wildCardHeader(colors){
+  // Build a header bar showing the actual colors the wild can be placed in
+  if(!colors||colors.length===0) return "background:linear-gradient(90deg,#FF1493,#1565C0,#FFA500)";
+  if(colors.length>=8) return "background:linear-gradient(90deg,#FF1493,#F44336,#FFA500,#FFEB3B,#388E3C,#1565C0,#9c27b0)";
+  // Dual-color wilds: split the header into even blocks
+  const pct=Math.round(100/colors.length);
+  const stops=colors.map((c,i)=>`${PC[c]?.bg||"#888"} ${i*pct}% ${(i+1)*pct}%`).join(",");
+  return `background:linear-gradient(90deg,${stops})`;
+}
+
 function gcardInner(card,ctx="hand"){
   if(card.type==="money"){
     const ms=MONEY_STYLE[card.value]||MONEY_STYLE[1];
@@ -888,13 +921,28 @@ function gcardInner(card,ctx="hand"){
       <div class="card-bot" style="background:${ms.bg};color:${ms.color}">Action: Bank Money</div>`;
   }
   if(card.type==="property"){
-    return `<div class="card-top" style="background:${PC[card.color].bg}"><span style="font-size:7px;font-weight:700;color:${PC[card.color].fg};text-align:center;line-height:1.1">${card.name}</span></div>
-      <div class="card-mid"><span style="font-size:20px;font-weight:900;color:${PC[card.color].bg}">$${card.value}M</span><span style="font-size:8px;color:#888">${PC[card.color].label}</span></div>
+    const col=PC[card.color]||{bg:"#888",fg:"#fff",label:"?"};
+    // Truncate long property names gracefully
+    const name=card.name||"";
+    const nameFontSize=name.length>16?"6px":name.length>12?"7px":"8px";
+    return `<div class="card-top" style="background:${col.bg};padding:2px 3px"><span style="font-size:${nameFontSize};font-weight:700;color:${col.fg};text-align:center;line-height:1.2;display:block;word-break:break-word">${name}</span></div>
+      <div class="card-mid"><span style="font-size:20px;font-weight:900;color:${col.bg}">$${card.value}M</span><span style="font-size:8px;color:#888">${col.label}</span></div>
       <div class="card-bot">Action: Play Property</div>`;
   }
   if(card.type==="wild"){
-    return `<div class="card-top" style="background:linear-gradient(90deg,#FF1493,#1565C0,#FFA500)"></div>
-      <div class="card-mid"><span style="font-size:10px;font-weight:800;text-transform:uppercase;line-height:1.2">${card.label}</span><span style="font-size:8px;color:#888;margin-top:2px">${card.sub}</span></div>
+    const colors=card.colors||[];
+    const headerStyle=wildCardHeader(colors);
+    const isAny=colors.length>=8;
+    // Show color chips for dual-color wilds
+    const colorChips=!isAny?colors.map(c=>{
+      const p=PC[c];return p?`<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${p.bg};border:1px solid rgba(0,0,0,.2);margin:1px"></span>`:"";
+    }).join(""):"";
+    return `<div class="card-top" style="${headerStyle}"></div>
+      <div class="card-mid" style="gap:3px;padding:4px 3px">
+        <span style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.3px">WILD</span>
+        <span style="font-size:8px;color:#555;font-weight:600">${card.sub||"Any Color"}</span>
+        ${colorChips?`<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:2px;margin-top:2px">${colorChips}</div>`:""}
+      </div>
       <div class="card-bot" style="color:#9c27b0">Action: Play Wild</div>`;
   }
   if(card.type==="action"){
@@ -1066,14 +1114,29 @@ function showJSNPrompt(actionLabel,attackerIdx,cardId){
   const jsnC=document.getElementById("jsnContainer");jsnC.innerHTML="";
   const ov=document.createElement("div");ov.className="jsn-overlay";
   const bx=document.createElement("div");bx.className="jsn-box";
-  // Build card preview if we can identify the card
-  const attackerCard=G.players[attackerIdx].hand.find(c=>c.id===cardId)||G.players[attackerIdx].hand.find(c=>c.type==="action"&&!["Just Say No"].includes(c.name));
-  const cardPreviewHTML=attackerCard?`<div style="display:inline-block;margin:8px 0 12px;transform:rotate(-3deg)">${gcardInner(attackerCard)}</div>`:"";
+
+  // Parse action type and property from the label
+  // Labels are like: "Sly Deal — stealing Vermont Ave (Lt.Blue) from Bob"
+  //                  "Deal Breaker — stealing complete Green set (...) from Bob"
+  //                  "Forced Deal — swapping X for Y with Bob"
+  //                  "Rent $3M on Orange (All players)"
+  //                  "Debt Collector $5M"
+  //                  "It's My Birthday — collect $2M"
+  let propHtml="";
+  // Extract property/color info to display prominently
+  const colorMatch=actionLabel.match(/\(([A-Za-z\s.]+)\)/);
+  const colorName=colorMatch?colorMatch[1].trim():null;
+  const colorKey=colorName?Object.keys(PC).find(k=>PC[k].label.toLowerCase()===colorName.toLowerCase()):null;
+  if(colorKey){
+    const col=PC[colorKey];
+    propHtml=`<div style="display:inline-block;background:${col.bg};color:${col.fg};padding:6px 16px;border:3px solid black;box-shadow:3px 3px 0 0 #000;font-size:13px;font-weight:800;margin:10px 0 14px;font-family:Montserrat,sans-serif">${col.label} Properties</div>`;
+  }
+
   bx.innerHTML=`<h2 style="font-size:20px;font-weight:900;margin-bottom:6px">🚫 Just Say No?</h2>
-    <p style="font-size:12px;color:#bbb;margin-bottom:4px"><strong>${attacker.name}</strong> is playing:</p>
-    <p style="font-size:13px;color:#ffe600;font-weight:700;margin-bottom:8px"><em>${actionLabel}</em></p>
-    ${cardPreviewHTML?`<div style="display:flex;justify-content:center;margin-bottom:12px"><div class="gcard" style="cursor:default;pointer-events:none">${gcardInner(attackerCard)}</div></div>`:""}
-    <p style="font-size:11px;color:#aaa;margin-bottom:18px">Block it with your Just Say No card?</p>`;
+    <p style="font-size:12px;color:#bbb;margin-bottom:4px"><strong>${attacker.name}</strong> is playing against you:</p>
+    <p style="font-size:13px;color:#ffe600;font-weight:700;margin-bottom:4px;line-height:1.4"><em>${actionLabel}</em></p>
+    ${propHtml}
+    <p style="font-size:11px;color:#aaa;margin-bottom:18px">Use your Just Say No to block it?</p>`;
   const yb=document.createElement("button");yb.className="modal-btn danger";yb.style.cssText="width:100%;padding:13px;font-size:14px;margin-bottom:8px";yb.textContent="🚫 JUST SAY NO!";
   yb.onclick=()=>{jsnC.innerHTML="";channel.publish("jsn_response",{attackerIdx,targetIdx:myPlayerIdx,used:true});};
   const nb=document.createElement("button");nb.className="modal-btn ghost";nb.style.cssText="width:100%;padding:11px";nb.textContent="Allow it";
