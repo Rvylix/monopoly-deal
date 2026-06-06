@@ -205,23 +205,26 @@ body{background-color:#007456;background-image:repeating-linear-gradient(45deg,r
 
   <!-- FOOTER: action buttons + hand -->
   <footer class="bg-surface-container-high border-t-8 border-black relative z-40 flex-shrink-0">
-    <!-- Floating action buttons -->
-    <div class="absolute -top-14 right-4 flex gap-3 z-50">
-      <button id="btnBank" onclick="handleBankSelected()" class="nb-btn px-5 py-3 bg-tertiary-container text-on-tertiary-container" style="display:none;font-size:14px;font-weight:900">
-        <span class="material-symbols-outlined">savings</span> BANK
-      </button>
-      <button id="btnPlay" onclick="handlePlaySelected()" disabled class="nb-btn px-6 py-3 bg-primary-container" style="font-size:15px;font-weight:900;display:none">
-        <span class="material-symbols-outlined">bolt</span> PLAY CARD
-      </button>
-      <button id="btnEnd" onclick="handleEndTurn()" class="nb-btn px-6 py-3 bg-secondary text-white" style="font-size:15px;font-weight:900;display:none">
-        END TURN <span class="material-symbols-outlined">arrow_forward</span>
-      </button>
-    </div>
-    <!-- Hand toggle -->
-    <div class="absolute -top-12 left-3 z-50">
+    <!-- Action bar — always visible -->
+    <div class="flex items-center justify-between px-4 py-2 border-b-2 border-black bg-surface-container" style="min-height:52px">
+      <!-- Hand toggle (left) -->
       <button onclick="toggleHand()" class="nb-btn px-4 py-2 bg-white text-sm">
         <span id="handToggleLbl" style="font-size:11px;font-weight:800">YOUR HAND (<span id="handCnt">0</span>) ▲</span>
       </button>
+      <!-- Action buttons (right) -->
+      <div class="flex gap-3 items-center">
+        <button id="btnBank" onclick="handleBankSelected()" class="nb-btn px-5 py-2 bg-tertiary-container text-on-tertiary-container" style="display:none;font-size:13px;font-weight:900">
+          <span class="material-symbols-outlined" style="font-size:18px">savings</span> BANK
+        </button>
+        <button id="btnPlay" onclick="handlePlaySelected()" disabled class="nb-btn px-6 py-2 bg-primary-container" style="font-size:14px;font-weight:900;display:none">
+          <span class="material-symbols-outlined" style="font-size:18px">bolt</span> PLAY CARD
+        </button>
+        <button id="btnEnd" onclick="handleEndTurn()" class="nb-btn px-6 py-2 bg-secondary text-white" style="font-size:14px;font-weight:900;display:none">
+          END TURN <span class="material-symbols-outlined" style="font-size:18px">arrow_forward</span>
+        </button>
+        <!-- Placeholder when not your turn -->
+        <div id="btnWaiting" style="display:none;font-family:Montserrat,sans-serif;font-size:12px;font-weight:700;color:#888;padding:8px 16px;border:2px solid #ccc;background:#f5f5f5">Waiting for your turn...</div>
+      </div>
     </div>
     <!-- Hand drawer -->
     <div id="handDrawer" class="closed">
@@ -687,6 +690,8 @@ function autoDraw(){
 function renderGame(){
   if(!G)return;
   const me=G.players[myPlayerIdx];const myTurn=isMyTurn();
+  // If it's our turn and still in draw phase, trigger autoDraw (catches missed setTimeout)
+  if(myTurn&&G.phase==="draw"){setTimeout(autoDraw,100);}
   renderLB();renderOpps();renderMyTable(me,myTurn);renderHand(me,myTurn);renderLog();
   // Buttons
   const sel=selectedCards.map(i=>me.hand[i]).filter(Boolean);
@@ -698,12 +703,18 @@ function renderGame(){
     sel.some(c=>c.type==="action"&&c.name==="Double Rent");
   const canPlay=canPlay1||canPlay2;
   // Bank: only money cards and action cards (NOT property, wild, or JSN)
+  // canBank: only money or non-JSN action cards (NOT property/wild)
+  // Parentheses critical — without them || breaks the myTurn guard
   const canBank=myTurn&&G.phase==="play"&&sel.length===1&&
-    sel[0].type==="money"||(sel.length===1&&sel[0].type==="action"&&sel[0].name!=="Just Say No"&&sel[0].type!=="property"&&sel[0].type!=="wild");
+    (sel[0].type==="money"||(sel[0].type==="action"&&sel[0].name!=="Just Say No"));
   const bp=document.getElementById("btnPlay");const be=document.getElementById("btnEnd");const bb=document.getElementById("btnBank");
-  bp.style.display=myTurn&&G.phase==="play"?"inline-flex":"none";bp.disabled=!canPlay||G.actionsLeft===0;
-  be.style.display=myTurn&&G.phase==="play"?"inline-flex":"none";
+  const bw=document.getElementById("btnWaiting");
+  const showActions=myTurn&&G.phase==="play";
+  bp.style.display=showActions?"inline-flex":"none";
+  bp.disabled=!canPlay||G.actionsLeft===0;
+  be.style.display=showActions?"inline-flex":"none";
   bb.style.display=canBank?"inline-flex":"none";
+  if(bw)bw.style.display=showActions?"none":"block";
   const badge=document.getElementById("actionsBadge");
   if(myTurn&&G.phase==="play"){badge.style.display="block";badge.textContent=G.actionsLeft+" ACTION"+(G.actionsLeft!==1?"S":"")+" LEFT";}
   else badge.style.display="none";  const cnt=me.hand.length;
