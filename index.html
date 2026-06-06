@@ -515,7 +515,7 @@ function payPlayer(debtor,creditor,owed){
 
 // ── STATE ─────────────────────────────────────────────────────────────────
 let myName="",roomCode="",myPlayerIdx=-1,isHost=false,roomPlayers=[];
-let G=null,selectedCards=[],modalStep={},_pendingJSN=null,_pendingJSNActionCard=null,handOpen=false;
+let G=null,selectedCards=[],modalStep={},_pendingJSN=null,_pendingJSNActionCard=null,_pendingJSNDoubleCard=null,handOpen=false;
 let _lastCurrentPlayer=-1; // tracks who had the turn last, to detect turn transitions
 
 // ── SOUND ─────────────────────────────────────────────────────────────────
@@ -615,12 +615,21 @@ async function subscribeRoom(){
         G.discard.push(ac);
       }
 
-      G.actionsLeft=Math.max(0,G.actionsLeft-1);
+      // 3. If a Double Rent card was part of the action, discard it too
+      if(_pendingJSNDoubleCard!=null){
+        const drIdx=attacker.hand.findIndex(c=>c.id===_pendingJSNDoubleCard.id);
+        if(drIdx>=0){const[dr]=attacker.hand.splice(drIdx,1);G.discard.push(dr);}
+      }
+
+      // Deduct correct number of actions (2 if doubled rent, 1 otherwise)
+      const actionCost=_pendingJSNDoubleCard!=null?2:1;
+      G.actionsLeft=Math.max(0,G.actionsLeft-actionCost);
       addLog(G,t.name+" used Just Say No! Both cards discarded.",msg.data.targetIdx);
       const capturedTargetIdx=msg.data.targetIdx;
       const capturedPendingJSN=_pendingJSN;
       _pendingJSN=null;
       _pendingJSNActionCard=null;
+      _pendingJSNDoubleCard=null;
       currentModal=null;
       selectedCards=[];
       document.getElementById("modalContainer").innerHTML="";
@@ -630,6 +639,7 @@ async function subscribeRoom(){
     }else{
       // Allowed — execute the pending action (pass null = no skip)
       _pendingJSNActionCard=null;
+      _pendingJSNDoubleCard=null;
       if(_pendingJSN){_pendingJSN(null);_pendingJSN=null;}
     }
   });
@@ -1155,12 +1165,18 @@ function checkJSN(targetPlayerIdx,actionLabel,cardIdx,onConfirm){
   _pendingJSNActionCard=attacker.hand[cardIdx]||null;
   const cardId=_pendingJSNActionCard?_pendingJSNActionCard.id:null;
 
+  // If this is a doubled rent, also capture the Double Rent card so jsn_response can discard it
+  _pendingJSNDoubleCard=null;
+  if(currentModal&&currentModal.doubled&&currentModal.doubleRentIdx!=null){
+    _pendingJSNDoubleCard=attacker.hand[currentModal.doubleRentIdx]||null;
+  }
+
   const jsnC=document.getElementById("jsnContainer");jsnC.innerHTML="";
   const ov=document.createElement("div");ov.className="jsn-overlay";
   const bx=document.createElement("div");bx.className="jsn-box";
   bx.innerHTML=`<h2 style="font-size:19px;font-weight:900;margin-bottom:8px">⏳ Waiting...</h2><p style="font-size:12px;color:#bbb;margin-bottom:18px">Asking <strong>${target.name}</strong> if they want to use<br><strong>Just Say No</strong> against:<br><em>${actionLabel}</em></p>`;
   const cb=document.createElement("button");cb.className="modal-btn ghost";cb.textContent="Cancel";
-  cb.onclick=()=>{_pendingJSN=null;_pendingJSNActionCard=null;jsnC.innerHTML="";closeModal();};
+  cb.onclick=()=>{_pendingJSN=null;_pendingJSNActionCard=null;_pendingJSNDoubleCard=null;jsnC.innerHTML="";closeModal();};
   bx.appendChild(cb);ov.appendChild(bx);jsnC.appendChild(ov);
   channel.publish("jsn_prompt",{targetIdx:targetPlayerIdx,attackerIdx:myPlayerIdx,actionLabel,cardIdx,cardId});
 }
@@ -1398,8 +1414,14 @@ function renderModal(){
     B("Cancel","ghost",closeModal);
   }
   else if(m.type==="improvement"){
-    const valid=Object.entries(me.properties).filter(([c,a])=>a.length>=PC[c].needed).filter(([c])=>{const im=me.improvements[c]||{};return m.improvType==="house"?!im.house:im.house&&!im.hotel;});
-    T(m.improvType==="house"?"🏠 Add House":"🏨 Add Hotel");if(!valid.length)W("No valid sets!");
+    // House/Hotel cannot be placed on Railroad or Utility sets
+    const ineligible=["railroad","utility"];
+    const valid=Object.entries(me.properties)
+      .filter(([c,a])=>!ineligible.includes(c)&&a.length>=PC[c].needed)
+      .filter(([c])=>{const im=me.improvements[c]||{};return m.improvType==="house"?!im.house:im.house&&!im.hotel;});
+    T(m.improvType==="house"?"🏠 Add House":"🏨 Add Hotel");
+    S(m.improvType==="house"?"Add to a complete color set (not Railroad/Utility).":"Add to a complete set that already has a House.");
+    if(!valid.length)W("No valid complete sets! (Railroad and Utility cannot have houses/hotels)");
     valid.forEach(([c])=>{const p=PC[c];CB(p.label,p.bg,p.fg,()=>resolveM("improvement",c));});B("Cancel","ghost",closeModal);
   }
   else if(m.type==="discard"){
