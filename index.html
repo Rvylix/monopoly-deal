@@ -516,6 +516,7 @@ function payPlayer(debtor,creditor,owed){
 // ── STATE ─────────────────────────────────────────────────────────────────
 let myName="",roomCode="",myPlayerIdx=-1,isHost=false,roomPlayers=[];
 let G=null,selectedCards=[],modalStep={},_pendingJSN=null,_pendingJSNActionCard=null,handOpen=false;
+let _lastCurrentPlayer=-1; // tracks who had the turn last, to detect turn transitions
 
 // ── SOUND ─────────────────────────────────────────────────────────────────
 function beep(f=520,d=180){
@@ -572,7 +573,17 @@ async function subscribeRoom(){
   channel.subscribe("join",msg=>{if(isHost){const n=msg.data.name;if(!roomPlayers.find(p=>p.name===n))roomPlayers.push({name:n,idx:roomPlayers.length});bcastRoom();}});
   channel.subscribe("room_state",msg=>{roomPlayers=msg.data.players;if(!isHost){const me=roomPlayers.find(p=>p.name===myName);if(me){myPlayerIdx=me.idx;_po=true;clearInterval(_pt);}}renderWaiting();});
   channel.subscribe("game_start",msg=>{_po=true;clearInterval(_pt);G=msg.data.game;showGame();if(myPlayerIdx===0)setTimeout(autoDraw,500);});
-  channel.subscribe("game_update",msg=>{G=msg.data.game;renderGame();if(G.winner){showWinner(G.winner);return;}if(isMyTurn()){showTurnAlert();if(G.phase==="draw")setTimeout(autoDraw,600);}});
+  channel.subscribe("game_update",msg=>{
+    const prevPlayer=_lastCurrentPlayer;
+    G=msg.data.game;
+    _lastCurrentPlayer=G.currentPlayer;
+    renderGame();
+    if(G.winner){showWinner(G.winner);return;}
+    // Only show turn alert when the turn CHANGES to us (not on every update during our turn)
+    const turnJustMovedToMe=isMyTurn()&&prevPlayer!==myPlayerIdx;
+    if(turnJustMovedToMe){showTurnAlert();}
+    if(isMyTurn()&&G.phase==="draw")setTimeout(autoDraw,600);
+  });
   channel.subscribe("jsn_prompt",msg=>{if(msg.data.targetIdx!==myPlayerIdx)return;showJSNPrompt(msg.data.actionLabel,msg.data.attackerIdx,msg.data.cardId);});
   channel.subscribe("jsn_response",msg=>{
     if(msg.data.attackerIdx!==myPlayerIdx)return;
@@ -654,7 +665,9 @@ function showGame(){
   document.getElementById("waitingRoom").style.display="none";
   document.getElementById("lobby").style.display="none";
   document.getElementById("game").style.display="flex";
-  renderGame();if(isMyTurn())showTurnAlert();
+  _lastCurrentPlayer=G?G.currentPlayer:-1; // set BEFORE alert so game_update won't double-fire
+  renderGame();
+  if(isMyTurn())showTurnAlert();
 }
 async function bcastGame(){
   // Check all players for winner before broadcasting
@@ -692,6 +705,7 @@ function drawCards(g,player,count){
 
 function autoDraw(){
   if(!isMyTurn()||G.phase!=="draw")return;
+  _lastCurrentPlayer=myPlayerIdx; // mark so game_update from this broadcast won't re-alert
   G=clone(G);const p=G.players[myPlayerIdx];
   // If hand is empty, draw 5; otherwise draw 2
   const drawCount=p.hand.length===0?5:2;
@@ -1030,6 +1044,11 @@ function handlePlaySelected(){
     const rentCard=cards.find(c=>c.type==="action"&&c.name.startsWith("Rent"));
     const doubleCard=cards.find(c=>c.type==="action"&&c.name==="Double Rent");
     if(rentCard&&doubleCard){
+      // Double Rent costs 2 actions — block if player doesn't have enough
+      if(G.actionsLeft<2){
+        showToast("Double Rent costs 2 actions — you only have "+G.actionsLeft+" action left!");
+        return;
+      }
       const rentIdx=me.hand.indexOf(rentCard);
       const doubleIdx=me.hand.indexOf(doubleCard);
       openModal({type:"rent",cardIdx:rentIdx,doubleRentIdx:doubleIdx,rentColors:rentCard.rentColors,doubled:true});
@@ -1455,7 +1474,7 @@ function resolveRentAll(m,color,rent,doubled=false){
         if(fb>=0){const[dr]=p.hand.splice(fb,1);G.discard.push(dr);}
       }
     }
-    G.actionsLeft-=doubled?2:1;
+    G.actionsLeft=Math.max(0,G.actionsLeft-(doubled?2:1));
     addLog(G,p.name+" charged $"+rent+"M ("+PC[color].label+")"+(doubled?" [DOUBLED]":"")+" to "+(jsnUsedBy.length>0?(targets.length-jsnUsedBy.length)+" player(s)":"everyone")+"!",myPlayerIdx);
     digestParts.forEach(d=>addLog(G,"  → "+d,myPlayerIdx));
     modalStep.jsnUsedBy=[];
@@ -1508,7 +1527,7 @@ function resolveM(action,arg1,arg2){
         if(fb>=0){const[dr]=p.hand.splice(fb,1);G.discard.push(dr);}
       }
     }
-    G.actionsLeft-=m.doubled?2:1;
+    G.actionsLeft=Math.max(0,G.actionsLeft-(m.doubled?2:1));
     addLog(G,p.name+" charged "+t.name+" $"+rent+"M ("+PC[color].label+")"+(m.doubled?" [DOUBLED — 2 actions]":"")+".",myPlayerIdx);
     addLog(G,"  → "+t.name+" paid: "+paymentDigest(t,paid,rent),myPlayerIdx);
     selectedCards=[];if(checkWinner(p))G.winner=p.name;bcastGame();closeModal();
